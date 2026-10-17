@@ -51,6 +51,21 @@ EXCLUDE_HINTS = ("酸奶", "酒", "啤酒", "醪糟", "米酒", "果酱", "奶�
 
 SUGAR_FREE = re.compile(r"无糖|0糖|零糖|０糖|0蔗糖|零蔗糖|无蔗糖")
 
+# 混装陷阱：标题写「雪碧芬达无糖可乐」时，只有"可乐"是无糖，雪碧和芬达是含糖款。
+# 所以对每个具体品牌名，要求它**紧邻**（前后 3 字内）出现无糖/0卡标记，否则判定含糖混装。
+MIX_BRANDS = ("雪碧", "芬达", "七喜", "美年达")
+SF_MARK = re.compile(r"无糖|0糖|零糖|０糖|0卡|零卡|零度|0脂肪|零脂肪")
+
+
+def sugary_component(title: str) -> str | None:
+    """返回标题里「没被无糖/0卡修饰」的品牌名；全都有修饰则返回 None。"""
+    for brand in MIX_BRANDS:
+        for m in re.finditer(re.escape(brand), title):
+            window = title[max(0, m.start() - 3) : m.end() + 3]
+            if not SF_MARK.search(window):
+                return brand
+    return None
+
 # 330ml*24罐 / 1L×12瓶 / 500毫升*6
 SPEC_UNIT = re.compile(
     r"(\d+(?:\.\d+)?)\s*(ml|毫升|ML|Ml|mL|l|L|升)\s*[*×xX✕]\s*(\d+)",
@@ -139,6 +154,11 @@ def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--keywords", default="", help="逗号分隔，默认用内置的一组")
     ap.add_argument("--exclude", default="", help="逗号分隔，标题含这些词就跳过（如 苏打水,临期）")
+    ap.add_argument(
+        "--allow-mixed",
+        action="store_true",
+        help="允许含糖混装（默认排除：如「雪碧芬达无糖可乐」只有可乐是无糖）",
+    )
     ap.add_argument("--pages", type=int, default=1, help="每个关键词翻几页（每页50）")
     ap.add_argument("--top", type=int, default=30)
     ap.add_argument("--json", default="", help="把明细写到这个路径")
@@ -167,6 +187,11 @@ def main() -> int:
                     continue
                 if any(e in title for e in excludes):
                     continue
+                mixed_brand = sugary_component(title)
+                if mixed_brand:
+                    # 混装里有含糖款，直接排除（除非用户就是要混装）
+                    if not args.allow_mixed:
+                        continue
                 total_ml, spec, ambiguous, count = parse_total_ml(title)
                 if not total_ml or not it.price:
                     continue
