@@ -140,6 +140,61 @@ TAOBAO_SESSION=          ← 待填
 TAOBAO_PID=              ← 待填
 ```
 
+## 进度更新 3：回调地址已配，但 OAuth 仍被拒
+
+### 已做
+
+发现「应用设置 → 基本信息」真正的内容在 iframe 里：
+
+```
+https://console.open.taobao.com/app/app.htm?hiddenLayout=true&appkey=35450610&appId=15172069#/config
+```
+
+直接打开这个 iframe 地址就能看到表单（从 `aff-open` 页面点进去时会因为父页面报错而不渲染）。
+在里面把 **回调URL** 填成 `https://www.taobao.com` 并保存，刷新后确认**已持久化**。
+
+另外确认：「应用设置 → **授权管理**」只是「设置用户数」（只自己使用 / 小部分人使用），
+**不提供生成 session 的功能**，`console.open.taobao.com/...#/auth`。
+
+### 仍然失败
+
+配好回调后重试 OAuth，两种 flow 都报同一个错：
+
+```
+response_type=token&view=web
+response_type=code&redirect_uri=https://www.taobao.com
+→ 错误信息: app call back is invalidate   错误码: invalid_client
+```
+
+**判断**：`https://www.taobao.com` 这种非自有域名，淘宝很可能不接受作为 OAuth 回调；
+联盟类应用的回调大概率要求**你自己名下、且已在淘宝开放平台登记过的域名**。
+
+### 因此淘宝只剩两个卡点
+
+| 卡点 | 原因 | 谁来做 |
+|---|---|---|
+| **OAuth session** | 需要合法回调域名；`taobao.com` 被拒 | 有备案域名时重配；否则提工单问淘宝 |
+| **PID** | 联盟后台 `pub.alimama.com/myunion.htm` 触发验证码拦截 | 必须人工在浏览器里取 |
+
+### 如果继续，两条路
+
+**A. 有备案域名**：把回调改成 `https://<你的域名>/callback`，再走 OAuth 拿 token。
+
+**B. 没域名**：给淘宝开放平台**提工单**，问：
+「应用 appkey 35450610 已在应用设置里配置回调URL，但 oauth.taobao.com 授权仍返回
+`app call back is invalidate / invalid_client`，请问联盟通用应用走 OAuth 需要什么条件？」
+
+（工单入口在 `aff-open.taobao.com` 顶部「工单支持」。）
+
+### `.env` 当前状态
+
+```
+TAOBAO_APP_KEY=35450610
+TAOBAO_APP_SECRET=已填
+TAOBAO_SESSION=          ← 待填（卡在 OAuth）
+TAOBAO_PID=              ← 待填（卡在验证码）
+```
+
 ## 下一步（注册完成后从这里继续）
 
 1. 在普通浏览器打开 <https://pub.alimama.com/> → 一键注册并登录（走支付宝实名）
