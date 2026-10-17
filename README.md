@@ -28,11 +28,35 @@ uv run shopping-mcp
 
 ### 挂进 DSH
 
+**推荐做法：用 DSH 自带的 MCP 管理界面。**
+
+如果你装了 [`dsh-mcp-manager-plus`](https://github.com/appthin/dsh-mcp-manager-plus)（设置里的「MCP 管理」页），这是最干净的一条路：写入由 DSH **主进程**完成，本来就有 profile 目录的写权限；profile 是 `patchReload: live`，所以**约 1 秒热生效，不需要重启**，而且是持久化的。
+
+1. **设置 → MCP 管理 → 添加**
+2. 粘贴下面这段（格式自动识别）：
+
+```json
+{
+  "mcpServers": {
+    "shopping": {
+      "command": "F:/DeepSeek/DeepSeek-Workplace/DSH-Workplace-01/shopping-mcp/.venv/Scripts/python.exe",
+      "args": ["-m", "shopping_mcp.server"]
+    }
+  }
+}
+```
+
+3. 保存后展开 `shopping` 那一行，应能看到 5 个工具：`shopping_status` / `search_products` / `get_product` / `convert_link`
+
+凭证**不要写在这里**——server 自己读项目根目录的 `.env`。管理器的掩码机制（`KEY|SECRET|TOKEN` 类值会打码）也说明这类配置本就是给它看的，密钥不该放进去。
+
+---
+
+以下三条是**没有管理器时的备选**，需要改文件或换启动参数。注意在 DSH 会话内（沙箱里）写 `~/.dsh` 会被拒绝，所以要在这之外执行。
+
 叠加层文件已经写好并做过结构校验：[`dsh/mcp-shopping.patch.yml`](dsh/mcp-shopping.patch.yml)。
 
-**注意：注册这一步必须在 DSH 会话之外执行。** 在会话内（沙箱内）写 `~/.dsh` 会被文件沙箱拒绝，提权也不放行；`dsh --dump-config` 同样因为要写 profile 目录而失败。所以它没被自动装上，需要你手动跑一次。
-
-**最省事：双击 [`scripts/register-mcp.cmd`](scripts/register-mcp.cmd)** —— 在 DSH 沙箱外的普通上下文执行，会先备份再追加，写完校验 YAML，最后提示你重启。
+**最省事：双击 [`scripts/register-mcp.cmd`](scripts/register-mcp.cmd)** —— 在普通 PowerShell 窗口执行（不要在 DSH 的终端里），会先备份再追加，写完校验 YAML。
 
 或者在 PowerShell 里手动跑（等价）：
 
