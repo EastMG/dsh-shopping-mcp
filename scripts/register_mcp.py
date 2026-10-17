@@ -13,20 +13,46 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import sys
 from datetime import datetime
 from pathlib import Path
 
-PROFILE = Path(__file__).resolve().parents[4] / ".dsh" / "profiles" / "desktop" / "cordis.patch.yml"
-# Fallback: resolve from DSH_HOME when the repo-relative guess is wrong.
-import os
-
-if not PROFILE.is_file() and os.environ.get("DSH_HOME"):
-    PROFILE = Path(os.environ["DSH_HOME"]) / "profiles" / "desktop" / "cordis.patch.yml"
-
 PROJECT = Path(__file__).resolve().parents[1]
 PYTHON = PROJECT / ".venv" / "Scripts" / "python.exe"
+
+
+def profile_candidates() -> list[Path]:
+    """Every place the DSH profile patch plausibly lives, in priority order.
+
+    Order matters: when this script runs from a normal PowerShell window
+    (which is the whole point of the .cmd wrapper) DSH_HOME is NOT set, so
+    ~/.dsh has to be the real fallback. An earlier version derived the path
+    from the repo layout and only fell back on DSH_HOME, which made the
+    double-click path resolve to F:\\DeepSeek\\.dsh - a directory that does
+    not exist.
+    """
+    candidates: list[Path] = []
+    home = os.environ.get("DSH_HOME")
+    if home:
+        candidates.append(Path(home) / "profiles" / "desktop" / "cordis.patch.yml")
+    candidates.append(Path.home() / ".dsh" / "profiles" / "desktop" / "cordis.patch.yml")
+    return candidates
+
+
+def resolve_profile() -> Path:
+    for candidate in profile_candidates():
+        if candidate.is_file():
+            return candidate
+    raise SystemExit(
+        "找不到 DSH profile 的 cordis.patch.yml。已尝试：\n"
+        + "\n".join(f"  - {c}" for c in profile_candidates())
+        + "\n如果 DSH 的 .dsh 目录在别处，设置环境变量 DSH_HOME 指向它再重跑。"
+    )
+
+
+PROFILE = resolve_profile()
 
 MARKER = "id: mcp-shopping"
 
