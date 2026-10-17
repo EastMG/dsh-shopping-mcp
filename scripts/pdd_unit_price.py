@@ -64,6 +64,8 @@ COUNT_ONLY = re.compile(r"(\d+)\s*(罐|瓶|盒|袋|包|支|听|桶)")
 # 多 SKU 标题：「12/24瓶」「12-24瓶」——低价往往对应小规格，必须按**小的**算，
 # 否则会把「12 瓶 ¥35.8」误算成 24 瓶，单价直接砍半。
 MULTI_COUNT = re.compile(r"(\d+)\s*[/\-~～]\s*(\d+)\s*(罐|瓶|盒|袋|包|支|听|桶)")
+# 「300ml*24/12」「888ml*12/24」这种：斜杠两侧都是件数，但后面没跟单位词
+SLASH_PAIR = re.compile(r"(?<![\d.])(\d+)\s*/\s*(\d+)(?![\d.])")
 # 买 N 送 M：实际到手 N+M
 BUY_GIFT = re.compile(r"买\s*(\d+)\s*送\s*(\d+)")
 
@@ -75,11 +77,23 @@ RISK_HINTS = {
 }
 
 
-def parse_total_ml(title: str) -> tuple[float | None, str, bool]:
+def _demote_slash_count(title: str, count: int) -> tuple[int, bool]:
+    """若标题里出现 `count/other`（如 *24/12）且没跟单位词，按**小的**算。"""
+    for m in SLASH_PAIR.finditer(title):
+        a, b = int(m.group(1)), int(m.group(2))
+        if count in (a, b) and a != b:
+            return min(a, b), True
+    return count, False
+
+
+def parse_total_ml(title: str) -> tuple[float | None, str, bool, int]:
     """从标题解析总容量(ml)。
 
-    返回 (总ml, 规格说明, 是否多SKU歧义)。
+    返回 (总ml, 规格说明, 是否多SKU歧义, 件数)。
     多 SKU 时**保守取小规格**——宁可低估容量，不要给出虚低的单价。
+
+    注意：拼多多搜索/详情接口只返回 `min_group_price`（最低 SKU 价），
+    没有 SKU 明细。所以本函数算出的单价是**下限**，页面实际价可能更高。
     """
     m_multi = MULTI_COUNT.search(title)
     m_gift = BUY_GIFT.search(title)
@@ -97,7 +111,9 @@ def parse_total_ml(title: str) -> tuple[float | None, str, bool]:
             ambiguous = True
         elif m_gift:
             count = int(m_gift.group(1)) + int(m_gift.group(2))
-        return ml * count, f"{m.group(1)}{m.group(2)}×{count}", ambiguous
+        else:
+            count, ambiguous = _demote_slash_count(title, count)
+        return ml * count, f"{m.group(1)}{m.group(2)}×{count}", ambiguous, count
 
     m2 = SPEC_ONLY.search(title)
     if m2:
@@ -106,28 +122,30 @@ def parse_total_ml(title: str) -> tuple[float | None, str, bool]:
         ml = qty * (1000 if unit in ("l", "升") else 1)
         if m_multi:
             count = min(int(m_multi.group(1)), int(m_multi.group(2)))
-            return ml * count, f"{m2.group(1)}{m2.group(2)}×{count}", True
+            return ml * count, f"{m2.group(1)}{m2.group(2)}×{count}", True, count
         if m_gift:
             count = int(m_gift.group(1)) + int(m_gift.group(2))
-            return ml * count, f"{m2.group(1)}{m2.group(2)}×{count}", False
+            return ml * count, f"{m2.group(1)}{m2.group(2)}×{count}", False, count
         m3 = COUNT_ONLY.search(title)
         if m3:
-            count = int(m3.group(1))
-            return ml * count, f"{m2.group(1)}{m2.group(2)}×{count}", False
-        return ml, f"{m2.group(1)}{m2.group(2)}（件数未知）", False
+            count, amb = _demote_slash_count(title, int(m3.group(1)))
+            return ml * count, f"{m2.group(1)}{m2.group(2)}×{count}", amb, count
+        return ml, f"{m2.group(1)}{m2.group(2)}（件数未知）", False, 1
 
-    return None, "容量未知", False
+    return None, "容量未知", False, 0
 
 
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--keywords", default="", help="逗号分隔，默认用内置的一组")
+    ap.add_argument("--exclude", default="", help="逗号分隔，标题含这些词就跳过（如 苏打水,临期）")
     ap.add_argument("--pages", type=int, default=1, help="每个关键词翻几页（每页50）")
     ap.add_argument("--top", type=int, default=30)
     ap.add_argument("--json", default="", help="把明细写到这个路径")
     args = ap.parse_args()
 
     keywords = [k.strip() for k in args.keywords.split(",") if k.strip()] or DEFAULT_KEYWORDS
+    excludes = [e.strip() for e in args.exclude.split(",") if e.strip()]
     config.load_dotenv()
     adapter = PddAdapter()
 
@@ -147,17 +165,22 @@ def main() -> int:
                     continue
                 if any(h in title for h in EXCLUDE_HINTS):
                     continue
-                total_ml, spec, ambiguous = parse_total_ml(title)
+                if any(e in title for e in excludes):
+                    continue
+                total_ml, spec, ambiguous, count = parse_total_ml(title)
                 if not total_ml or not it.price:
                     continue
-                unit_price = it.price / (total_ml / 1000)  # 元/升
+                unit_price = it.price / (total_ml / 1000)  # 元/升（下限）
+                per_piece = round(it.price / count, 2) if count else None
                 risks = [label for hint, label in RISK_HINTS.items() if hint in title]
                 seen[it.item_id] = {
                     "title": title,
-                    "price": it.price,               # 券后价
+                    "price": it.price,               # 券后价（最低SKU）
                     "coupon": it.coupon_amount or 0,
                     "original": it.original_price,
                     "spec": spec,
+                    "count": count,
+                    "per_piece": per_piece,
                     "ambiguous": ambiguous,
                     "risks": risks,
                     "total_l": round(total_ml / 1000, 3),
@@ -171,8 +194,12 @@ def main() -> int:
 
     rows = sorted(seen.values(), key=lambda r: r["unit_price"])
 
-    print(f"\n共命中 {len(rows)} 个「无糖 + 可算单价」的商品，按券后单价（元/升）升序\n")
-    header = f"{'#':>3}  {'券后单价':>9}  {'券后价':>8}  {'规格':<16} {'销量':>8}  {'佣金':>5}  {'类型':<4} 标记 / 商品"
+    print(f"\n共命中 {len(rows)} 个「无糖 + 可算单价」的商品，按券后单价（元/升，**下限**）升序")
+    print("⚠ 拼多多接口只给「最低SKU价」，标题规格与低价常非同一 SKU。")
+    print("  看重列「元/瓶」自己判断：若单瓶低得离谱，说明该价对应更小规格，需到页面核实。\n")
+    header = (
+        f"{'#':>3}  {'元/L':>8}  {'元/瓶':>7}  {'券后价':>8}  {'规格':<14} {'销量':>8}  {'佣金':>5}  {'类型':<4} 标记 / 商品"
+    )
     print(header)
     print("-" * (len(header) + 20))
     for i, r in enumerate(rows[: args.top], 1):
@@ -185,9 +212,10 @@ def main() -> int:
             marks.append("多SKU")
         marks.extend(r["risks"])
         mark_s = ("[" + ",".join(marks) + "] ") if marks else ""
+        pp = f"¥{r['per_piece']:.2f}" if r["per_piece"] else "-"
         print(
-            f"{i:>3}  ¥{r['unit_price']:>7.2f}/L  ¥{r['price']:>6.2f}  {r['spec']:<16} "
-            f"{sales_s:>8}  {rate:>5}  {kind:<4} {mark_s}{r['title'][:30]}"
+            f"{i:>3}  ¥{r['unit_price']:>6.2f}  {pp:>7}  ¥{r['price']:>6.2f}  {r['spec']:<14} "
+            f"{sales_s:>8}  {rate:>5}  {kind:<4} {mark_s}{r['title'][:28]}"
         )
 
     if args.json:
