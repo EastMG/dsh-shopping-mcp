@@ -74,8 +74,20 @@ class JdAdapter(Adapter):
         params["sign"] = sign_md5(self.cfg.secret, params)
         payload = request_json("POST", GATEWAY, data=params)
 
-        response_key = method.replace(".", "_") + "_response"
-        wrapper = payload.get(response_key)
+        # JD returns the wrapper under `<method>_responce` for many endpoints -
+        # "responce", misspelled, straight from their gateway. Other endpoints
+        # use the normal spelling. Accept both, then fall back to any unique key.
+        base = method.replace(".", "_")
+        wrapper = payload.get(base + "_response")
+        if wrapper is None:
+            wrapper = payload.get(base + "_responce")
+        if wrapper is None:
+            candidates = [
+                k for k in payload
+                if (k.endswith("_response") or k.endswith("_responce")) and k != "error_response"
+            ]
+            if len(candidates) == 1:
+                wrapper = payload[candidates[0]]
         if wrapper is None:
             # JD reports errors under a nested `error_response` key.
             err = payload.get("error_response") or {}
@@ -97,10 +109,27 @@ class JdAdapter(Adapter):
             return {}
         if isinstance(raw_result, str):
             try:
-                return json.loads(raw_result)
+                parsed: Any = json.loads(raw_result)
             except ValueError as exc:
                 raise PlatformError("jd", f"result is not JSON (method={method})", detail=raw_result) from exc
-        return raw_result if isinstance(raw_result, dict) else {"data": raw_result}
+        else:
+            parsed = raw_result
+
+        # JD sometimes returns a *business* error inside `result` as a JSON
+        # string ({"code":..,"message":..}) instead of as a transport error.
+        # Returning that as-is made search() see no `data` and report
+        # "0 products" - a silent wrong answer. Surface it instead.
+        if isinstance(parsed, dict):
+            inner_code = parsed.get("code")
+            if inner_code not in (None, "", "0", 0) and "data" not in parsed:
+                raise PlatformError(
+                    "jd",
+                    f"{parsed.get('message') or parsed.get('zh_desc') or 'call failed'} (method={method})",
+                    code=str(inner_code),
+                    detail=parsed,
+                )
+            return parsed
+        return {"data": parsed}
 
     # ------------------------------------------------------------------ tools
     def search(
