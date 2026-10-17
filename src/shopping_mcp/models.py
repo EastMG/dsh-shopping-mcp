@@ -36,6 +36,10 @@ class Product:
     item_url: str | None = None
     promotion_url: str | None = None        # 推广链接（转链后才有）
     image_url: str | None = None
+    # Platform-specific extras that are useful downstream but do not have a
+    # cross-platform equivalent. Pinduoduo puts `goods_sign` here, which is the
+    # token its link-conversion API now requires instead of goods_id.
+    extra: dict[str, Any] = field(default_factory=dict)
     raw: dict[str, Any] = field(default_factory=dict, repr=False)
 
     def to_dict(self, *, include_raw: bool = False) -> dict[str, Any]:

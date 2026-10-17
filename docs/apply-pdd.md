@@ -84,6 +84,47 @@
 
 **结论：从注册到 API 可用，一个人 1 小时内能走完，主要时间花在填实名表单上。**
 
+## 第四段：授权备案（最容易漏，漏了所有 API 都报错）
+
+拿到 PID 还**不能**直接调商品接口。拼多多要求「推手本人」做过一次**授权备案**，否则：
+
+```
+sub_code 60001 — 未传入已经授权备案过的相关参数(pid/custom_parameters)
+```
+
+注意这不是凭证错误，是**账号维度的授权**。官方 FAQ：<https://jinbao.pinduoduo.com/qa-system?questionId=218>
+
+- 谁拿佣金谁备案 —— 就是将来收佣金的那个拼多多账号
+- 一个拼多多账号最多备案给 5 个业务平台推手身份；一个推手只需备案一次
+- 网页上**没有**备案表单，只能通过 API 走这两步：
+
+```powershell
+uv run python scripts\pdd_authorize.py          # 查状态；没备案就生成备案链接
+uv run python scripts\pdd_authorize.py --status # 只查
+```
+
+脚本内部用：
+- `pdd.ddk.member.authority.query` —— 查，`bind == 1` 即已备案
+- `pdd.ddk.rp.prom.url.generate`（`channel_type=10`）—— 生成备案链接
+
+拿到链接后**用你已登录拼多多的浏览器打开** → 点「确认授权」→ 再跑一次脚本，应显示 `bind=1`。
+
+> 实测：备案生效有几十秒延迟，刚 `bind=1` 立刻调搜索可能仍返回 0 条，等一下再试。
+
+## 第五段：goods_sign，不是 goods_id
+
+拼多多已经停用 `goods_id` 入参（2026-10 实测）：
+
+| 接口 | 传 goods_id 的报错 | 正确入参 |
+|---|---|---|
+| `pdd.ddk.goods.promotion.url.generate` | `40005 goods_id_list已下线，请使用goods_sign_list代替` | `goods_sign_list`（数组） |
+| `pdd.ddk.goods.detail` | `40004 goods_id_list已下线` / `10002 goodsId与goodsSign为空` | `goods_sign`（**单数**） |
+
+所以流程是：**搜索 → 从结果取 `extra.goods_sign` → 用它查详情 / 转链**。
+
+`goods_id` 仍会出现在搜索结果里（用于拼商品页 URL），但不能作为接口入参。
+本项目已把 `goods_sign` 放进归一化结果的 `extra.goods_sign`，直接传它即可。
+
 ---
 
 ## 填完之后

@@ -69,6 +69,21 @@ def logic_checks() -> None:
     check("pdd: fen -> yuan", _cents(19900) == 199.0, str(_cents(19900)))
     check("pdd: per-mille -> percent", _per_mille(100) == 10.0, str(_per_mille(100)))
 
+    # sales_tip arrives as a human string, verified against live data ("7万+")
+    from shopping_mcp.adapters.pdd import _looks_like_goods_sign, _parse_sales_tip
+
+    for raw, expected in [("7万+", 70000), ("1.2万+", 12000), ("4076+", 4076), ("100+", 100)]:
+        check(f"pdd: sales_tip {raw!r} -> {expected}", _parse_sales_tip(raw) == expected, str(_parse_sales_tip(raw)))
+    check("pdd: sales_tip empty -> None", _parse_sales_tip("") is None, repr(_parse_sales_tip("")))
+
+    # PDD retired goods_id; link conversion now requires the opaque goods_sign
+    check(
+        "pdd: goods_sign recognised",
+        _looks_like_goods_sign("E9r2FTP7ehJtQoJhwfDBSPVauidVnMCITg_JLvHvUnqH"),
+        "20+ char token should be a sign",
+    )
+    check("pdd: numeric id is not a sign", not _looks_like_goods_sign("787484083334"), "digits only")
+
     from shopping_mcp.adapters.taobao import _normalize_rate as tb_rate
 
     check("taobao: fraction keeps precision", tb_rate(0.155) == 15.5, str(tb_rate(0.155)))

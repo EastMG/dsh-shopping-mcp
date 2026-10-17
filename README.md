@@ -173,30 +173,47 @@ uv run python scripts\probe_creds.py --platform pdd
 |---|---|---|
 | 签名算法（三平台共用） | 与手算 MD5 对齐 | 通过 |
 | 单位归一化（分→元、千分比→百分比、汇率三口径） | 单元断言 | 通过 |
-| 淘宝 PID 解析 | 单元断言 | 通过 |
-| 四个工具的 MCP 协议往返 | 内存传输握手 + `tools/list` + `tools/call` | 36/36 通过 |
+| 淘宝 PID 解析 / 拼多多 `sales_tip` 解析 / `goods_sign` 判别 | 单元断言 | 通过 |
+| 五个工具的 MCP 协议往返 | 内存传输握手 + `tools/list` + `tools/call` | 43/43 通过 |
 | 商品字段一致性（价格 = 原价 − 券） | 断言 | 通过 |
 | `has_coupon` 确实只返回有券商品 | 断言 | 通过 |
 | 非法 platform 不崩、返回 `ok:false` | 断言 | 通过 |
 | DSH 叠加层结构与 YAML 合法性 | 结构校验 | 通过 |
-| 拼多多网关连通性与请求构造 | 用**假** client_id 实打 `pdd.ddk.goods.search` | 返回结构化业务错误 `code=10016 client 无效`，说明请求已到达业务校验层、出网正常 |
-| 凭证自检脚本的失败诊断 | 同上，故意用假凭证 | 正确归类为「应用凭证无效或应用未上线」 |
-| smoke 的机器无关性 | 灌入假凭证后重跑 | 仍 36/36，不依赖本机 `.env` |
+| smoke 的机器无关性 | 灌入假凭证后重跑 | 仍 43/43，不依赖本机 `.env` |
+| **拼多多真实接口全链路** | **真实 appkey + 已完成授权备案** | **✅ 通过** |
 
-跑法：`uv run python scripts\smoke.py`
+**拼多多 live 实核（2026-10-18）**：
 
-### 未验证（需要真实凭证 / 需要重启 DSH）
+| 能力 | 结果 |
+|---|---|
+| 签名 | ✅ 真实网关接受（走到业务校验层，不再报签名错） |
+| `pdd.ddk.goods.search` | ✅ 返回真实商品：`【原道】弦雪入耳DSP有线耳机` ¥49.99/¥60.99、券 ¥10、佣金率 3.0%、销量 4076 |
+| `pdd.ddk.goods.detail` | ✅ 用 `goods_sign` 查到详情 |
+| `pdd.ddk.goods.promotion.url.generate` | ✅ 生成真实推广链接 + 短链 `https://p.pinduoduo.com/lL4kjhCQ?sc=EFAC` |
+| `pdd.ddk.member.authority.query` | ✅ `bind=1`（授权备案已完成） |
+| 传数字 goods_id | ✅ 按预期拒绝，并给出「改用 extra.goods_sign」的指引 |
 
-- **三家真实接口从未调通过** —— 还没拿到任何 appkey
-- **签名正确性在真实网关上未被独立证实** —— 拼多多那次探测的错误是「client 无效」，客户端校验挡住了签名校验，所以只能说明请求构造和出网正常，不能说明签名对。拿到真 client_id 后跑 `probe_creds.py`，若报签名错误再改 `signing.py`
-- `pdd.ddk.*` / `jd.union.open.*` / `taobao.tbk.*` 的字段映射基于公开文档 + 社区资料，首次真实调用应打开 `raw` 对照官方文档复核
-- **DSH 里的 stdio 启动** 未验证。会话内沙箱禁止创建子进程双向管道（WinError 5），所以协议层是用内存传输测的；真实的 stdio 拉起只能等你注册并重启 DSH 后确认
-- 淘宝 `taobao.tbk.item.info.get` 商品详情接口近年有收紧，若报权限错误属预期，改用搜索接口的物料数据即可
+跑法：`uv run python scripts\smoke.py`（43 项，全 mock，无需凭证）
 
-### 踩过的坑（已修）
+### 未验证
 
-- `commission_rate` 归一化原先走 `to_float()`，那个函数为金额做两位小数舍入，会把小数形式 `0.155` 变成 `0.15`，报出 15.0% 而不是 15.5%。已改为直接 `float()`。
-- Windows 下管道 stdout 默认用 ANSI 代码页（cp936），中文标题会乱码或抛 `UnicodeEncodeError`。已在 `main()` 里 `reconfigure(encoding="utf-8")`。
+- **淘宝 / 京东从未调通** —— 还没申请这两家
+- **DSH 里的 stdio 启动** 未验证。会话内沙箱禁止创建子进程双向管道（WinError 5），所以协议层是用内存传输测的；真实 stdio 拉起要等你注册并重启 DSH 后确认
+- 拼多多 `ddk.goods.search` 对新应用有节流，同样关键词有时返回 0 条、有时 3 条。这不是 bug，重试即可
+
+### 踩过的坑（已修，都是真实接口才暴露的）
+
+| 坑 | 表现 | 修法 |
+|---|---|---|
+| `commission_rate` 走 `to_float()` | 该函数为金额舍入到 2 位，把 `0.155` 变成 `0.15` → 报 15.0% 而非 15.5% | 改用原始 `float()` |
+| Windows 管道 stdout 默认 cp936 | 中文标题乱码 / `UnicodeEncodeError` | `main()` 里 `reconfigure(encoding="utf-8")` |
+| 拼多多响应 key 不总镜像方法名 | `member.authority.query` 实际返回 `authority_query_response`，被误报 "unexpected response shape" | 回退到唯一的 `*_response` key |
+| `pageSize` 必须 10-100 | 传 2 报 `50001 / 3000000` | adapter 内 clamp |
+| `goods_id_list` 已下线 | 转链报 `40005`，详情报 `40004` | 改用 `goods_sign`（单数）/ `goods_sign_list`（转链） |
+| `pdd.ddk.rp.prom.url.generate` 要 `p_id_list` | 报「请求参数不能为空：p_id_list」 | 传数组 |
+| `promotion_url` 被误赋成图片地址 | 归一化结果里推广链接变成了商品图 | 置 `None`，只有转链后才有 |
+| `sales` 是字符串 `"7万+"` | 直接 `to_int` 得到 None | 新增 `_parse_sales_tip()` |
+| 拼多多搜索不返回店铺名 | `mall_name` 恒为空字符串 | 如实返回 `null`，不用品牌名冒充 |
 
 ## 开发
 

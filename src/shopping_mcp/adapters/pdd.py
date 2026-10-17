@@ -18,6 +18,7 @@ Unit traps (these are the usual source of "price looks 100x too big"):
 from __future__ import annotations
 
 import json
+import re
 import time
 from typing import Any
 
@@ -39,6 +40,28 @@ def _per_mille(value: Any) -> float | None:
     """千分比 -> percent."""
     rate = to_float(value)
     return round(rate / 10, 2) if rate is not None else None
+
+
+def _parse_sales_tip(value: Any) -> int | None:
+    """PDD gives sales as a human string: '7万+' -> 70000, '1.2万+' -> 12000.
+
+    Verified against live data: the field is `sales_tip`, a String, not a count.
+    """
+    if value is None:
+        return None
+    text = str(value).strip()
+    if not text:
+        return None
+    multiplier = 10000 if "万" in text else 1
+    match = re.search(r"\d+(?:\.\d+)?", text)
+    if not match:
+        return None
+    return int(float(match.group(0)) * multiplier)
+
+
+def _looks_like_goods_sign(value: str) -> bool:
+    """goods_sign is a long opaque token; goods_id is pure digits."""
+    return bool(value) and not value.isdigit() and len(value) >= 20
 
 
 def _find_url(node: Any) -> str | None:
@@ -140,17 +163,48 @@ class PddAdapter(Adapter):
         wrapper = self._call("pdd.ddk.goods.search", business)
         return [self._product(item) for item in (wrapper.get("goods_list") or [])]
 
-    def detail(self, item_id: str) -> Product:
-        wrapper = self._call("pdd.ddk.goods.detail", {"goods_id_list": [int(item_id)]})
+    def detail(self, item: str) -> Product:
+        """按 goods_sign 查详情。
+
+        实测（2026-10）：pdd.ddk.goods.detail 只认**单数** `goods_sign`；
+        传 `goods_id_list` 报 40004（已下线），传 `goods_sign_list` 报 10002
+        （goodsId与goodsSign为空），传数字 goods_id 同样报 10002。
+        没有 goods_id -> goods_sign 的接口，所以数字 id 只能明确拒绝。
+        """
+        value = str(item).strip()
+        if not _looks_like_goods_sign(value):
+            raise PlatformError(
+                "pdd",
+                f"拼多多已停用 goods_id 入参（{value}）。请改用搜索结果里的 "
+                "extra.goods_sign（一长串字母数字 token）来查详情或转链。",
+            )
+        wrapper = self._call("pdd.ddk.goods.detail", {"goods_sign": value})
         details = wrapper.get("goods_details") or []
         if not details:
-            raise PlatformError("pdd", f"item not found: {item_id}")
+            raise PlatformError("pdd", f"item not found: {value}", detail=wrapper)
         return self._product(details[0])
 
     def convert_link(self, item: str, *, sub_pid: str | None = None) -> PromotionLink:
+        """商品 -> 推广链接。
+
+        实测（2026-10）：`goods_id_list` 已下线，传了会返回
+        sub_code 40005「goods_id_list已下线，请使用goods_sign_list代替」。
+        所以这里接受两种输入：
+          * goods_sign（搜索/详情返回的那串不透明 token）—— 直接用
+          * 纯数字 goods_id —— 先经 pdd.ddk.goods.detail 换成 goods_sign
+        """
+        value = str(item).strip()
+        if not _looks_like_goods_sign(value):
+            raise PlatformError(
+                "pdd",
+                f"拼多多已停用 goods_id 入参（{value}）。请改用搜索结果里的 "
+                "extra.goods_sign（一长串字母数字 token）来转链。",
+            )
+        sign = value
+
         business: dict[str, Any] = {
             "p_id": self.pid,
-            "goods_id_list": [int(item)],
+            "goods_sign_list": [sign],
             "generate_short_url": True,
             "generate_authority_url": True,
         }
@@ -231,10 +285,15 @@ class PddAdapter(Adapter):
                 if (final_price is not None and rate is not None)
                 else None
             ),
-            sales=to_int(item.get("sales_tip")) or to_int(item.get("sold_quantity")),
-            shop_name=item.get("mall_name"),
+            sales=_parse_sales_tip(item.get("sales_tip")) or to_int(item.get("sold_quantity")),
+            # 实测：goods.search 返回的 mall_name 常为空字符串，店铺名拿不到就是拿不到，
+            # 不要用 brand_name 冒充店铺名。品牌名在 raw.brand_name 里。
+            shop_name=item.get("mall_name") or None,
             item_url=f"https://mobile.yangkeduo.com/goods.html?goods_id={item.get('goods_id')}",
-            promotion_url=item.get("goods_image_url"),
+            # 推广链接要转链后才有，不能拿图片地址顶替（这里曾经是个 bug）
+            promotion_url=None,
             image_url=item.get("goods_image_url") or item.get("goods_thumbnail_url"),
+            # goods_sign is what convert_link needs now (goods_id_list is retired)
+            extra={"goods_sign": item.get("goods_sign")},
             raw=item,
         )

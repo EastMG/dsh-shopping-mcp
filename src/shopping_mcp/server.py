@@ -137,11 +137,14 @@ def search_products(
 
 @mcp.tool()
 def get_product(platform: str, item_id: str) -> str:
-    """按商品 id 查详情（淘宝 num_iid / 京东 skuId / 拼多多 goods_id）。
+    """按商品 id 查详情。
+
+    淘宝传 num_iid，京东传 skuId，**拼多多传 goods_sign**（搜索结果 item.extra.goods_sign
+    那一长串 token —— 拼多多已停用数字 goods_id）。
 
     Args:
         platform: taobao / jd / pdd
-        item_id: 平台商品 id，纯数字字符串
+        item_id: 淘宝 num_iid / 京东 skuId / 拼多多 goods_sign
     """
     try:
         adapter, mode, note = _resolve(platform)
@@ -159,11 +162,14 @@ def get_product(platform: str, item_id: str) -> str:
 
 @mcp.tool()
 def convert_link(platform: str, item: str, sub_pid: str | None = None) -> str:
-    """把商品 id 或普通商品链接转成自己的推广/返利链接（含优惠券）。
+    """把商品转成自己的推广/返利链接（含优惠券）。
+
+    **拼多多要传 goods_sign**（搜索结果 item.extra.goods_sign），不是数字 goods_id；
+    拼多多已把 goods_id_list 从转链接口下线（会报 40005）。
 
     Args:
         platform: taobao / jd / pdd
-        item: 商品 id，或完整的商品页 URL
+        item: 淘宝 num_iid、京东 skuId 或商品 URL、拼多多 goods_sign
         sub_pid: 可选，子推广位/自定义参数，用于区分流量来源
     """
     try:
