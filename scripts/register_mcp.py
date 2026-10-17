@@ -124,14 +124,38 @@ def main() -> int:
         validate(PROFILE)
         return 0
 
-    backup = _backup()
-    if not text.endswith("\n"):
-        text += "\n"
-    PROFILE.write_text(text + BLOCK, encoding="utf-8")
+    try:
+        backup = _backup()
+        if not text.endswith("\n"):
+            text += "\n"
+        PROFILE.write_text(text + BLOCK, encoding="utf-8")
+    except PermissionError as exc:
+        _explain_write_denied(exc)
+
     print(f"appended shopping-mcp entry; backup at {backup}")
     validate(PROFILE)
     print("\nRestart DSH for the new MCP server to be picked up.")
     return 0
+
+
+def _explain_write_denied(exc: OSError) -> None:
+    """Turn a bare PermissionError into something the user can act on."""
+    patch = PROJECT / "dsh" / "mcp-shopping.patch.yml"
+    raise SystemExit(
+        f"\n写不了 {PROFILE}\n"
+        f"  底层错误: {exc}\n\n"
+        "这个目录的 ACL 对当前用户其实是 Full control，所以大概率不是权限配置问题，\n"
+        "而是**跑这个脚本的进程本身被限制了**。按可能性排序：\n\n"
+        "  1) 窗口是 DSH 沙箱 / 低完整性级别（Low IL）\n"
+        "     → 在开始菜单里新开一个普通 PowerShell 再跑，不要从 DSH 的终端里跑。\n"
+        "       自查命令:  whoami /groups ^| findstr Mandatory\n"
+        "       看到 \"Low Mandatory Level\" 就是这种情况。\n\n"
+        "  2) 需要提权\n"
+        "     → 右键 register-mcp.cmd →「以管理员身份运行」。\n\n"
+        "  3) 不想动任何配置（跳过注册，用叠加层启动）\n"
+        f'     → dsh --profile desktop --patch "{patch}" web\n'
+        "       或者双击 scripts\\start-dsh-with-shopping.cmd\n"
+    )
 
 
 def _backup() -> Path:
