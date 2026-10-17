@@ -77,27 +77,36 @@ taobao_open_uid= AAFMzam2AOeLLiWB5eooKnDj
 | 权限包 16516 | 已获得（实测只含店铺搜索） |
 | 权限包 27939（商品物料获取） | ❌ 我的自动化提交不生效，需人工点 |
 
-### 还差两步（都需要人工，各约 1 分钟）
+### 还差一步：27939 权限包（商品搜索）
 
-**1. 建推广位拿 PID**
+**PID 已到手**：`mm_7057489931_3442300186_116334800076`
+（memberId `7057489931` / siteId `3442300186` = 媒体ID / adzoneId `116334800076`）
 
-`pub.alimama.com` → 推广管理 → 推广位管理 → **新增推广位**：
-- 媒体类型：他方平台
-- 媒体名称：East晨曦
-- 推广位名称：随便（如「晨曦分享位」）
-- 确定
+**权限包 27939「商品物料获取」状态：申请中**（等审核）。
 
-列表里会出现 `mm_<memberId>_<siteId>_<adzoneId>`，填进 `.env` 的 `TAOBAO_PID`。
+目前各接口实测：
 
-> 为什么我来不了：这个弹窗是阿里自研 Magix 组件，下拉框的 DOM 结构与标准 select 不同，
-> 程序化点击反复被图标层拦截；而且联盟后台有滑块验证（这次侥幸自动拖过了一次）。
+| 接口 | 状态 |
+|---|---|
+| `taobao.tbk.shop.get`（店铺搜索） | ✅ 可用 |
+| `taobao.tbk.dg.material.optional`（商品搜索） | ❌ 需 27939 |
+| `taobao.tbk.privilege.get`（商品转链） | ❌ 需对应权限包 |
+| `taobao.tbk.dg.optimus.material`（物料精选） | ❌ 需 16518 |
 
-**2. 申请 27939 权限包（商品搜索）**
+> 注意：物料搜索接口返回的 `click_url` / `coupon_share_url` **本身就是推广链接**，
+> 所以 27939 批下来后，搜索+转链一步到位，可能不需要单独的转链权限包。
 
-开放平台 → 应用管理 → East晨曦 → 管理 → 找到「淘宝客【推广者】商品物料获取 27939」→ 申请权限 → 填理由 → 确定。
+### token 续期已脚本化
 
-> 为什么我来不了：这个「申请权限」的提交从自动化点「确定」后状态恒为 0（不报错也不生效）；
-> 16516 就是人工点才成功的。
+`scripts\taobao_refresh_token.py`（已实测通过）：
+
+```bat
+uv run python scripts\taobao_refresh_token.py           :: 续期并写回 .env
+uv run python scripts\taobao_refresh_token.py --check   :: 只看当前 token
+```
+
+access_token 1 天有效、refresh_token 30 天。脚本会原地改写 `.env` 里的
+`TAOBAO_SESSION` 和 `TAOBAO_REFRESH_TOKEN`，其它行（含注释）原样保留。
 
 ## 待办
 

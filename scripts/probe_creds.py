@@ -84,7 +84,11 @@ def diagnose(exc: Exception) -> str:
     if any(k in blob for k in ("pid", "p_id", "adzone")):
         return "PID / 推广位无效 → 回联盟后台重新取推广位 ID"
     if any(k in blob for k in ("权限", "permission", "不支持", "not support", "scope", "无权限")):
-        return "权限不足 → 应用还没获得该接口权限（拼多多需先做完多多进宝绑定与发布）"
+        return (
+            "权限不足 → 应用还没获得该接口权限。按平台分别处理："
+            "拼多多要完成多多进宝绑定并发布；淘宝要申请对应权限包"
+            "（商品搜索需 27939「商品物料获取」）；京东要申请接口权限"
+        )
     if any(k in blob for k in ("session", "token", "授权", "oauth", "过期")):
         return "授权 session / token 无效或过期 → 需要重新走一次 OAuth 授权"
     if isinstance(exc, HttpError):
