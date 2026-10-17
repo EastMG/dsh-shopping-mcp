@@ -1,0 +1,48 @@
+[project]
+name = "shopping-mcp"
+version = "0.1.0"
+description = "MCP server that unifies Taobao / JD / Pinduoduo product search, detail and affiliate link conversion, using only official open-platform APIs."
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{ name = "EastMG" }]
+keywords = [
+    "mcp",
+    "model-context-protocol",
+    "taobao",
+    "jd",
+    "pinduoduo",
+    "affiliate",
+    "shopping",
+    "dsh",
+]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Office/Business",
+]
+dependencies = [
+    "mcp>=1.2.0,<2",
+    "httpx>=0.27.0",
+]
+
+[project.scripts]
+shopping-mcp = "shopping_mcp.server:main"
+
+[project.urls]
+Repository = "https://github.com/EastMG/dsh-shopping-mcp"
+Issues = "https://github.com/EastMG/dsh-shopping-mcp/issues"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/shopping_mcp"]

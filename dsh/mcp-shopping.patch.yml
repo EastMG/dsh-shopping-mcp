@@ -1,0 +1,29 @@
+# shopping-mcp — DSH 叠加层（patch overlay）
+#
+# 三种用法，任选其一：
+#
+# A) 只验证、不改任何东西（推荐先跑这个）：
+#      dsh --profile desktop --patch "<本文件绝对路径>" --dump-config
+#    输出里出现 id: mcp-shopping 即说明叠加层合法。
+#
+# B) 临时挂载，不写 profile 配置：
+#      dsh --profile desktop --patch "<本文件绝对路径>" web
+#
+# C) 永久生效：把下面的 `- insert:` 整段追加到
+#      C:\Users\<你>\.dsh\profiles\desktop\cordis.patch.yml  末尾
+#    然后重启 DSH。（推荐，因为 A/B 每次启动都要带参数）
+#
+# 凭证不在这里配置。server 启动时自行读取
+#   F:\DeepSeek\DeepSeek-Workplace\DSH-Workplace-01\shopping-mcp\.env
+# 未填凭证的平台会自动以 mock 模式运行，所以先注册再申请 appkey 也能用。
+
+- insert:
+    - id: mcp-shopping
+      name: "@deepseek-ai/dsh-mcp-client"
+      config:
+        serverName: "shopping"
+        transport: "stdio"
+        command: "F:/DeepSeek/DeepSeek-Workplace/DSH-Workplace-01/shopping-mcp/.venv/Scripts/python.exe"
+        args:
+          - "-m"
+          - "shopping_mcp.server"

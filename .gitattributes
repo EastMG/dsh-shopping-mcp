@@ -1,0 +1,12 @@
+# 统一换行符，避免 Windows / Linux 来回 checkout 产生无意义的 diff
+* text=auto eol=lf
+
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+# 二进制
+*.png binary
+*.jpg binary
+*.gif binary
+*.zip binary
