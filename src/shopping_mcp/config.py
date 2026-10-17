@@ -58,7 +58,13 @@ def load_dotenv(path: Path | None = None, override: bool = False) -> Path | None
 
     Format: KEY=VALUE per line, `#` comments, optional surrounding quotes.
     Values already present in the real environment win unless override=True.
+
+    Set SHOPPING_MCP_SKIP_DOTENV=1 to ignore any .env file entirely — the test
+    suite uses this so its result does not depend on the machine it runs on.
     """
+    if os.environ.get("SHOPPING_MCP_SKIP_DOTENV", "").strip().lower() in {"1", "true", "yes"}:
+        return None
+
     candidates = [path] if path else [
         Path.cwd() / ".env",
         _project_root() / ".env",

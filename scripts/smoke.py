@@ -24,6 +24,17 @@ import os
 import sys
 
 os.environ.setdefault("SHOPPING_MCP_MOCK", "1")
+# Hermetic: ignore any real .env and any ambient credentials, so this suite
+# behaves identically on a bare checkout and on a machine that has already
+# filled in its appkeys. Without this, smoke would start failing the moment the
+# user configures a platform for real.
+os.environ["SHOPPING_MCP_SKIP_DOTENV"] = "1"
+
+from shopping_mcp import config as _config  # noqa: E402
+
+for _keys in _config.REQUIRED_KEYS.values():
+    for _key in _keys:
+        os.environ.pop(_key, None)
 
 from mcp.shared.memory import create_connected_server_and_client_session  # noqa: E402
 

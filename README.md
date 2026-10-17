@@ -32,9 +32,9 @@ uv run shopping-mcp
 
 **注意：注册这一步必须在 DSH 会话之外执行。** 在会话内（沙箱内）写 `~/.dsh` 会被文件沙箱拒绝，提权也不放行；`dsh --dump-config` 同样因为要写 profile 目录而失败。所以它没被自动装上，需要你手动跑一次。
 
-三种姿势，任选：
+**最省事：双击 [`scripts/register-mcp.cmd`](scripts/register-mcp.cmd)** —— 在 DSH 沙箱外的普通上下文执行，会先备份再追加，写完校验 YAML，最后提示你重启。
 
-**A. 永久生效（推荐）** — 在自己的 PowerShell 里跑：
+或者在 PowerShell 里手动跑（等价）：
 
 ```powershell
 cd F:\DeepSeek\DeepSeek-Workplace\DSH-Workplace-01\shopping-mcp
@@ -42,18 +42,12 @@ $env:UV_CACHE_DIR="$PWD\..\.uv-cache-probe"
 uv run --with pyyaml python scripts\register_mcp.py
 ```
 
-脚本是幂等的（已注册则无操作），会先备份 `cordis.patch.yml` 再追加，写完后校验 YAML 能解析。验证结果：
+其它两种姿势：
 
-```powershell
-dsh --profile desktop --dump-config | Select-String mcp-shopping
-```
-
-然后重启 DSH。
-
-**B. 手动粘贴** — 把 `dsh/mcp-shopping.patch.yml` 里 `- insert:` 那一段追加到
+**A. 手动粘贴** — 把 `dsh/mcp-shopping.patch.yml` 里 `- insert:` 那一段追加到
 `C:\Users\<你>\.dsh\profiles\desktop\cordis.patch.yml` 末尾，重启 DSH。
 
-**C. 临时挂载** — 不写任何配置，每次启动带参数：
+**B. 临时挂载** — 不写任何配置，每次启动带参数：
 
 ```powershell
 dsh --profile desktop --patch "F:\DeepSeek\DeepSeek-Workplace\DSH-Workplace-01\shopping-mcp\dsh\mcp-shopping.patch.yml" web
@@ -73,6 +67,29 @@ Copy-Item .env.example .env
 未填的平台会自动降级成 **mock 模式**：工具照样能用，返回的是 `mock.local` 域名下的假数据，字段和真实数据完全一致。这样在等审核期间就能把链路和 prompt 调好。
 
 随时调用 `shopping_status` 看当前哪家是 live、哪家是 mock、缺哪个变量。
+
+### 填完先自检
+
+拿到 appkey 后别急着让 agent 搜商品，先跑一次凭证自检——它真的发一次请求，很便宜：
+
+```powershell
+uv run python scripts\probe_creds.py              # 验证所有已配置的平台
+uv run python scripts\probe_creds.py --platform pdd
+```
+
+它会区分这几类失败（它们的报错长得不一样，脚本会把 code 和原始返回一起打出来）：
+
+| 现象 | 含义 |
+|---|---|
+| 签名错误 | secret 填错，或首尾有多余空格/引号 |
+| 应用凭证无效 / 应用未上线 | key 复制错，或应用还在审核、没发布 |
+| 权限不足 / 不支持的接口 | **最常见**：多多进宝没绑定、淘宝客权限没批下来 |
+| PID / 推广位无效 | PID 取错 |
+| 授权 session 失效 | OAuth token 过期，要重新授权 |
+
+成功时会打印**平台真实返回的字段名**和**我们的归一化结果**并排对照，同时把完整原始返回写到 `_probe_raw_<platform>.json`。把这个输出贴给 agent，就能据此校准字段映射——现在的映射是照文档推的，只有对过真实返回才算数。
+
+拼多多的完整申请流程见 [docs/apply-pdd.md](docs/apply-pdd.md)（含最容易漏的「多多进宝绑定」那一步）。
 
 ## 三家平台的申请门槛
 
@@ -162,12 +179,16 @@ Copy-Item .env.example .env
 | `has_coupon` 确实只返回有券商品 | 断言 | 通过 |
 | 非法 platform 不崩、返回 `ok:false` | 断言 | 通过 |
 | DSH 叠加层结构与 YAML 合法性 | 结构校验 | 通过 |
+| 拼多多网关连通性与请求构造 | 用**假** client_id 实打 `pdd.ddk.goods.search` | 返回结构化业务错误 `code=10016 client 无效`，说明请求已到达业务校验层、出网正常 |
+| 凭证自检脚本的失败诊断 | 同上，故意用假凭证 | 正确归类为「应用凭证无效或应用未上线」 |
+| smoke 的机器无关性 | 灌入假凭证后重跑 | 仍 36/36，不依赖本机 `.env` |
 
 跑法：`uv run python scripts\smoke.py`
 
 ### 未验证（需要真实凭证 / 需要重启 DSH）
 
 - **三家真实接口从未调通过** —— 还没拿到任何 appkey
+- **签名正确性在真实网关上未被独立证实** —— 拼多多那次探测的错误是「client 无效」，客户端校验挡住了签名校验，所以只能说明请求构造和出网正常，不能说明签名对。拿到真 client_id 后跑 `probe_creds.py`，若报签名错误再改 `signing.py`
 - `pdd.ddk.*` / `jd.union.open.*` / `taobao.tbk.*` 的字段映射基于公开文档 + 社区资料，首次真实调用应打开 `raw` 对照官方文档复核
 - **DSH 里的 stdio 启动** 未验证。会话内沙箱禁止创建子进程双向管道（WinError 5），所以协议层是用内存传输测的；真实的 stdio 拉起只能等你注册并重启 DSH 后确认
 - 淘宝 `taobao.tbk.item.info.get` 商品详情接口近年有收紧，若报权限错误属预期，改用搜索接口的物料数据即可
@@ -180,12 +201,16 @@ Copy-Item .env.example .env
 ## 开发
 
 ```powershell
-uv sync                                          # 装依赖
-uv run python scripts\smoke.py                   # 36 项检查，全部走 mock，不需要任何凭证
-uv run --with pyyaml python scripts\check_patch.py   # 校验 DSH 叠加层结构
+uv sync                                              # 装依赖
+uv run python scripts\smoke.py                       # 36 项检查，全部走 mock，不需要任何凭证
+uv run --with pyyaml python scripts\check_patch.py    # 校验 DSH 叠加层结构
+uv run python scripts\probe_creds.py                 # 用真实凭证验证字段映射
 ```
 
 `scripts/register_mcp.py` 负责把服务注册进 DSH profile，幂等、自动备份、写后校验。
+`scripts/register-mcp.cmd` 是它的双击入口。
+
+`smoke.py` 是 **hermetic** 的：它会忽略真实 `.env` 并清掉环境里所有凭证变量，所以无论你机器上配没配 appkey，结果都一样。填了真凭证之后它也不会误报。
 
 ## License
 
