@@ -87,6 +87,59 @@
 4. 取推广位 **PID**（`mm_<memberId>_<siteId>_<adzoneId>`）
 5. 填 `.env` → `probe_creds.py --platform taobao`
 
+## 进度更新 2（权限包已批 + 凭证已取）
+
+| 项 | 结果 |
+|---|---|
+| 权限包「淘宝客【推广者】物料搜索」16516 | ✅ **已获得**（已获得 6 个，可申请剩 15 个） |
+| AppKey | ✅ `35450610`（已写入 `.env`） |
+| AppSecret | ✅ 已取到并写入 `.env`（应用管理页点「查看」明文显示） |
+| 应用状态 | ✅ 已上线 |
+| OAuth 取 session | ❌ 报错 `app call back is invalidate` / `invalid_client` |
+| PID（推广位） | ⏳ 未取到 |
+
+### 剩余三件事
+
+**1. 配回调地址（OAuth 报错的原因）**
+
+`oauth.taobao.com/authorize?response_type=token&client_id=35450610` 返回：
+
+```
+错误信息: app call back is invalidate
+错误码：invalid_client
+```
+
+说明应用**没有配置回调地址**。需要去 应用设置 → **基本信息** 里填回调地址。
+（我这边点进去页面加载报错、控制台 10 条异常，表单没渲染出来，所以没填成。）
+
+**2. 取 PID（推广位）**
+
+在联盟后台 <https://pub.alimama.com/> → 推广管理 → 推广位管理，形如
+`mm_<memberId>_<siteId>_<adzoneId>`。
+
+**注意**：我访问 `pub.alimama.com/myunion.htm` 被淘宝反爬拦在「验证码拦截」页，
+这一步自动化做不了，必须人工取。
+
+**3. 取 session**
+
+回调地址配好后，打开：
+
+```
+https://oauth.taobao.com/authorize?response_type=token&client_id=35450610&state=shopping&view=web
+```
+
+授权后 token 会出现在跳转 URL 的 `#access_token=...` 里，把那一串填进
+`.env` 的 `TAOBAO_SESSION`。
+
+### `.env` 当前状态
+
+```
+TAOBAO_APP_KEY=35450610
+TAOBAO_APP_SECRET=已填
+TAOBAO_SESSION=          ← 待填
+TAOBAO_PID=              ← 待填
+```
+
 ## 下一步（注册完成后从这里继续）
 
 1. 在普通浏览器打开 <https://pub.alimama.com/> → 一键注册并登录（走支付宝实名）
