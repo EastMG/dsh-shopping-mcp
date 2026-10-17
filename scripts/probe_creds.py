@@ -1,7 +1,7 @@
 """Validate credentials and verify field mapping against the real API.
 
 For every platform whose `.env` credentials are complete, this issues exactly
-ONE cheap real request (a 2-row keyword search) and prints:
+ONE cheap real request (a 10-row keyword search - PDD rejects fewer than 10) and prints:
 
   * whether the call succeeded
   * a plain-language diagnosis when it failed (sign / permission / pid / ...)
@@ -71,6 +71,11 @@ def diagnose(exc: Exception) -> str:
 
     if "sign" in blob or "签名" in blob:
         return "签名错误 → client_secret / app_secret 填错，检查首尾空格与引号"
+    if "参数校验" in blob or "参数不合法" in blob or "param" in blob:
+        return (
+            "参数不合法 → 不是凭证问题，是本项目传的参数超出平台取值范围；"
+            "看 sub_msg 给出的合法区间，然后修对应 adapter"
+        )
     if any(k in blob for k in ("client下线", "clientid", "client_id", "app_key", "app已下线")):
         return (
             "应用凭证无效或应用未上线 → client_id / app_key 复制错了，"
@@ -101,7 +106,7 @@ def probe(platform: str, keyword: str) -> bool:
         return False
 
     try:
-        items = adapter.search(keyword, page_size=2)
+        items = adapter.search(keyword, page_size=10)
     except (PlatformError, HttpError, KeyError) as exc:
         code = getattr(exc, "code", "")
         label = f"  (code={code})" if code else ""

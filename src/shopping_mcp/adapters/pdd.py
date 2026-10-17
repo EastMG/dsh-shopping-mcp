@@ -41,6 +41,27 @@ def _per_mille(value: Any) -> float | None:
     return round(rate / 10, 2) if rate is not None else None
 
 
+def _find_url(node: Any) -> str | None:
+    """Dig the first http(s) url out of an arbitrarily shaped response."""
+    if isinstance(node, str):
+        return node if node.startswith("http") else None
+    if isinstance(node, dict):
+        for key in ("url", "mobile_url", "short_url", "mobile_short_url"):
+            value = node.get(key)
+            if isinstance(value, str) and value.startswith("http"):
+                return value
+        for value in node.values():
+            found = _find_url(value)
+            if found:
+                return found
+    if isinstance(node, list):
+        for value in node:
+            found = _find_url(value)
+            if found:
+                return found
+    return None
+
+
 class PddAdapter(Adapter):
     platform = "pdd"
     mode = "live"
@@ -76,6 +97,13 @@ class PddAdapter(Adapter):
         response_key = method.replace("pdd.", "").replace(".", "_") + "_response"
         wrapper = payload.get(response_key)
         if wrapper is None:
+            # PDD does not always mirror the method name in the response key:
+            # pdd.ddk.member.authority.query -> authority_query_response.
+            # Fall back to the single *_response key when it is unambiguous.
+            candidates = [k for k in payload if k.endswith("_response")]
+            if len(candidates) == 1:
+                wrapper = payload[candidates[0]]
+        if wrapper is None:
             raise PlatformError("pdd", f"unexpected response shape (method={method})", detail=payload)
         return wrapper
 
@@ -100,7 +128,9 @@ class PddAdapter(Adapter):
         business: dict[str, Any] = {
             "keyword": keyword,
             "page": page,
-            "page_size": min(max(page_size, 1), 100),
+            # PDD rejects page_size outside 10-100 with code 50001 /
+            # sub_code 3000000 ("pageSize的取值范围是10-100"). Clamp, don't pass through.
+            "page_size": min(max(page_size, 10), 100),
             "pid": self.pid,
             "sort_type": sort_map.get(sort, 0),
         }
@@ -141,6 +171,38 @@ class PddAdapter(Adapter):
             short_url=link.get("mobile_short_url") or link.get("short_url"),
             raw=link,
         )
+
+    # -------------------------------------------------- 授权备案 (authority)
+    # PDD gates 商品搜索/转链 behind a per-推手 "授权备案": the account that
+    # earns commission must open an authorization link once and confirm.
+    # Without it every call returns sub_code 60001
+    # ("未传入已经授权备案过的相关参数"). Docs: qa-system?questionId=218
+    def authority_status(self) -> dict[str, Any]:
+        """pdd.ddk.member.authority.query — bind == 1 means 备案 done."""
+        last: PlatformError | None = None
+        for key in ("pid", "p_id"):
+            try:
+                return self._call("pdd.ddk.member.authority.query", {key: self.pid})
+            except PlatformError as exc:
+                last = exc
+                if "参数" not in str(exc):
+                    raise
+        raise PlatformError("pdd", "member.authority.query rejected both pid and p_id", detail=str(last))
+
+    def authority_url(self, custom_parameters: str | None = None) -> str:
+        """pdd.ddk.rp.prom.url.generate with channel_type=10 -> 授权备案链接.
+
+        This endpoint wants `p_id_list` (an array), not the `p_id` scalar that
+        most other ddk endpoints take.
+        """
+        business: dict[str, Any] = {"p_id_list": [self.pid], "channel_type": 10}
+        if custom_parameters:
+            business["custom_parameters"] = custom_parameters
+        wrapper = self._call("pdd.ddk.rp.prom.url.generate", business)
+        url = _find_url(wrapper)
+        if not url:
+            raise PlatformError("pdd", "no authority url in response", detail=wrapper)
+        return url
 
     # ---------------------------------------------------------------- mapping
     def _product(self, item: dict[str, Any]) -> Product:
