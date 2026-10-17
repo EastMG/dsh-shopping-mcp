@@ -1,238 +1,69 @@
-# 淘宝联盟：接入进展（实测记录）
+# 淘宝联盟：OAuth 已通，API 已真实调通（2026-10-18）
 
-2026-10-18 在真实淘宝账号（`tb519991176` / eastmg）上走了一遍。
+## 结论先行
 
-> **当前状态**：开放平台开发者资质**秒过**，应用创建表单已打开，但卡在
-> 「联盟备案身份」下拉**无选项**——因为该淘宝账号**还没有注册淘宝联盟（推广者）账户**。
+> **不需要备案域名。** 之前判断错了。
 >
-> **结论：淘宝是三家里面门槛最低的**——不需要备案域名、不需要营业执照，
-> 只要注册一个联盟账户（依赖淘宝绑定的支付宝实名）。
+> OAuth 失败的真实原因是：**淘宝禁止把自己的域名（`www.taobao.com`）当作回调地址**。
+> 换成任意中性域名（我用 `https://example.com`）立刻通过，授权页正常弹出。
 
-## 与京东的关键差异
-
-| 项 | 淘宝 | 京东 |
-|---|---|---|
-| 关键词搜索接口 | ✅ 有（`taobao.tbk.dg.material.optional`） | ❌ 基础权限里没有 |
-| 开发者资质申请 | 填 3 个只读字段，**秒过** | 要主体资质 |
-| 推广媒体要求 | 社交平台/内容平台即可，**不要域名备案** | 必须 ICP 备案网站 / 上架APP / 真实流量渠道 |
-
-## 已完成的（实测）
-
-| 步骤 | 结果 |
-|---|---|
-| 淘宝账号登录 `aff-open.taobao.com`（淘宝联盟开放平台） | ✅ |
-| 进入开发者后台（`/developer/index.htm`） | ✅ 有「新建应用」 |
-| 创建应用 → 一级类目「联盟合作」→ 二级类目「联盟通用应用」 | ✅ 可申请 |
-| **申请资质**（联系人姓名/电话/邮箱，全部只读预填） | ✅ **提交后瞬间通过**，状态由「可申请」变「可创建」 |
-| 打开创建应用表单 | ✅ 字段：应用名称 / 联盟推广阵地 / 联盟备案类型 / 联盟备案身份 / 主营业务 |
-
-### 表单里的可选值（实测）
-
-- **联盟推广阵地**：`自有平台` / `他方平台` / `无自有阵地`
-- 选「他方平台」后，**联盟备案类型**：`社交平台` / `内容平台`
-- **联盟备案身份**：**无选项** ← 卡点
-
-不管选「无自有阵地」还是「他方平台 + 社交平台/内容平台」，备案身份都是空的。
-说明备案身份来自**已在淘宝联盟完成的推广者备案**，不是这里现填的。
-
-## 卡点：没有淘宝联盟（推广者）账户
-
-访问 `pub.alimama.com` 会被导到 `/portal/v2/account/register/index.htm`（注册页），
-说明该淘宝账号尚未入驻淘宝联盟。
-
-注册页要求：
-- 依据**淘宝绑定支付宝的实名认证结果**确认真实身份
-- 一个真实身份**只能注册一个**淘宝联盟账户
-- 反作弊校验淘宝账号历史与安全状况
-- 同意 3 份协议后点「一键注册并登录」
-
-**自动点击后卡在「正在注册中」不动**（30 秒无进展，控制台无报错、无新窗口），
-推测是支付宝实名授权的弹窗被浏览器拦截。这一步需要人工在普通浏览器里完成。
-
-## 进度更新（2026-10-18 晚）：应用已建成
-
-用户完成「推广者备案」后，应用创建全流程打通：
-
-| 步骤 | 结果 |
-|---|---|
-| 联盟账户注册 | ✅ 用户完成 |
-| 推广者备案提交 | ✅ 「联盟备案身份」下拉出现 `East晨曦` |
-| 开放平台开发者资质 | ✅ 秒过 |
-| **创建应用** | ✅ **成功**：应用名 `East晨曦`、类型 联盟开放、类目 联盟通用应用、状态 **已上线** |
-| **AppKey** | ✅ `35450610`（应用授权等级 2 级，证书流量 10 万次/天） |
-| 可申请权限包 | 16 个，其中 **「淘宝客【推广者】物料搜索」= 16516**（根据关键词搜索商品）正是本项目要用的 |
-| **权限包申请** | ❌ 点「申请权限」→ 填申请理由 → 确定，对话框关闭但状态不变（申请中仍 0） |
-| **AppSecret** | ⏳ 应用管理页打码显示，需点「查看」或「重置」 |
-
-### 权限包申请为什么没生效
-
-自动化点击「确定」后：对话框关闭、无 toast、刷新后「申请中权限包」仍为 0。
-两种可能：
-
-1. 申请请求被平台拒绝，但错误提示没渲染出来（被吞掉）；
-2. 该账号的**淘宝客推广者身份尚未完成全部认证**，导致不具备申请 API 权限包的资格。
-
-**建议人工在浏览器里点一次「申请权限」，看是否弹出真正的错误提示**——这一步自动化看不到反馈。
-
-### 其他需要注意的
-
-- 应用名最终显示为 `East晨曦`（沿用备案媒体名），不是创建时填的「晨曦Toolkit」。
-- 应用管理页顶部出现了无关的「轮盘抽奖助手」卡片（疑为平台模板推荐），不影响功能。
-
-### 剩余步骤
-
-1. 拿到 **AppSecret**（应用管理 → 查看/重置）
-2. 申请通过 **权限包 16516（物料搜索）**，可能还需要 16189（物料信息查询）、12340（长链转短链）
-3. 通过 `oauth.taobao.com` 授权拿 **session**
-4. 取推广位 **PID**（`mm_<memberId>_<siteId>_<adzoneId>`）
-5. 填 `.env` → `probe_creds.py --platform taobao`
-
-## 进度更新 2（权限包已批 + 凭证已取）
+## 已打通的部分
 
 | 项 | 结果 |
 |---|---|
-| 权限包「淘宝客【推广者】物料搜索」16516 | ✅ **已获得**（已获得 6 个，可申请剩 15 个） |
-| AppKey | ✅ `35450610`（已写入 `.env`） |
-| AppSecret | ✅ 已取到并写入 `.env`（应用管理页点「查看」明文显示） |
-| 应用状态 | ✅ 已上线 |
-| OAuth 取 session | ❌ 报错 `app call back is invalidate` / `invalid_client` |
-| PID（推广位） | ⏳ 未取到 |
+| 应用 | East晨曦，已上线，AppKey `35450610` |
+| 回调URL | `https://example.com`（必须是**非淘宝域名**） |
+| OAuth 授权 | ✅ 授权页正常，返回 code |
+| token 交换 | ✅ 拿到 access_token（1 天）+ refresh_token（30 天） |
+| 签名 | ✅ 真实网关接受 |
+| **`taobao.tbk.shop.get`（店铺搜索）** | ✅ **真实调通**，返回真实店铺列表 |
+| 权限包 16516「物料搜索」 | 已获得，但**实际只含 `taobao.tbk.shop.get`**（店铺搜索），不含商品搜索 |
+| `taobao.tbk.dg.material.optional`（商品搜索） | ❌ `isv.permission-api-package-limit`，需另一个权限包 |
 
-### 剩余三件事
-
-**1. 配回调地址（OAuth 报错的原因）**
-
-`oauth.taobao.com/authorize?response_type=token&client_id=35450610` 返回：
+### 关键数据
 
 ```
-错误信息: app call back is invalidate
-错误码：invalid_client
+app_key        = 35450610
+taobao_user_id = 3893269134   ← PID 前缀 mm_<memberId>_
+taobao_open_uid= AAFMzam2AOeLLiWB5eooKnDj
 ```
 
-说明应用**没有配置回调地址**。需要去 应用设置 → **基本信息** 里填回调地址。
-（我这边点进去页面加载报错、控制台 10 条异常，表单没渲染出来，所以没填成。）
+均已写入 `.env`（含 refresh_token 与 member_id）。
 
-**2. 取 PID（推广位）**
+### 真实调通证据
 
-在联盟后台 <https://pub.alimama.com/> → 推广管理 → 推广位管理，形如
-`mm_<memberId>_<siteId>_<adzoneId>`。
+`taobao.tbk.shop.get` 返回：
 
-**注意**：我访问 `pub.alimama.com/myunion.htm` 被淘宝反爬拦在「验证码拦截」页，
-这一步自动化做不了，必须人工取。
-
-**3. 取 session**
-
-回调地址配好后，打开：
-
-```
-https://oauth.taobao.com/authorize?response_type=token&client_id=35450610&state=shopping&view=web
+```json
+{"tbk_shop_get_response": {"results": {"n_tbk_shop": [
+  {"seller_nick": "悦音数码店", "shop_title": "悦音数码店", "user_id": 216314767562771122},
+  {"seller_nick": "慕翎大码女装 ML家定制大码女装", ...}
+]}}}
 ```
 
-授权后 token 会出现在跳转 URL 的 `#access_token=...` 里，把那一串填进
-`.env` 的 `TAOBAO_SESSION`。
+## 踩过的坑（按发现顺序）
 
-### `.env` 当前状态
+1. **应用基本设置页面在 iframe 里**，父页面有 JS 报错所以看着像白屏：
+   ```
+   https://console.open.taobao.com/app/app.htm?hiddenLayout=true&appkey=35450610&appId=15172069#/config
+   ```
+   直接打开 iframe 地址才有表单。
 
-```
-TAOBAO_APP_KEY=35450610
-TAOBAO_APP_SECRET=已填
-TAOBAO_SESSION=          ← 待填
-TAOBAO_PID=              ← 待填
-```
+2. **回调URL 的保存必须用真实键入**。用程序赋值（`el.value = x` + dispatchEvent）在阿里 Fusion 组件上会被吞掉；
+   而且先赋值再键入会**拼接成重复 URL**（`https://www.taobao.comhttps://www.taobao.com`），
+   导致保存进库的是非法值。要用 Playwright 的 `pressSequentially` 先清空再输入。
 
-## 进度更新 3：回调地址已配，但 OAuth 仍被拒
+3. **`www.taobao.com` 作回调会被拒**（`app call back is invalidate / invalid_client`）。
+   这是最迷惑的一点——错误信息看起来像"回调地址格式不对"，实际是"不允许用淘宝自己的域名"。
 
-### 已做
+4. **权限包名不副实**：16516 描述写「根据关键词搜索商品、店铺」，实际 scope 里只有
+   `taobao.tbk.shop.get`（店铺搜索）。商品搜索要另外的包（27939「商品物料获取」或 16518「物料精选」）。
 
-发现「应用设置 → 基本信息」真正的内容在 iframe 里：
+## 待办
 
-```
-https://console.open.taobao.com/app/app.htm?hiddenLayout=true&appkey=35450610&appId=15172069#/config
-```
-
-直接打开这个 iframe 地址就能看到表单（从 `aff-open` 页面点进去时会因为父页面报错而不渲染）。
-在里面把 **回调URL** 填成 `https://www.taobao.com` 并保存，刷新后确认**已持久化**。
-
-另外确认：「应用设置 → **授权管理**」只是「设置用户数」（只自己使用 / 小部分人使用），
-**不提供生成 session 的功能**，`console.open.taobao.com/...#/auth`。
-
-### 仍然失败
-
-配好回调后重试 OAuth，两种 flow 都报同一个错：
-
-```
-response_type=token&view=web
-response_type=code&redirect_uri=https://www.taobao.com
-→ 错误信息: app call back is invalidate   错误码: invalid_client
-```
-
-**判断**：`https://www.taobao.com` 这种非自有域名，淘宝很可能不接受作为 OAuth 回调；
-联盟类应用的回调大概率要求**你自己名下、且已在淘宝开放平台登记过的域名**。
-
-### 因此淘宝只剩两个卡点
-
-| 卡点 | 原因 | 谁来做 |
-|---|---|---|
-| **OAuth session** | 需要合法回调域名；`taobao.com` 被拒 | 有备案域名时重配；否则提工单问淘宝 |
-| **PID** | 联盟后台 `pub.alimama.com/myunion.htm` 触发验证码拦截 | 必须人工在浏览器里取 |
-
-### 如果继续，两条路
-
-**A. 有备案域名**：把回调改成 `https://<你的域名>/callback`，再走 OAuth 拿 token。
-
-**B. 没域名**：给淘宝开放平台**提工单**，问：
-「应用 appkey 35450610 已在应用设置里配置回调URL，但 oauth.taobao.com 授权仍返回
-`app call back is invalidate / invalid_client`，请问联盟通用应用走 OAuth 需要什么条件？」
-
-（工单入口在 `aff-open.taobao.com` 顶部「工单支持」。）
-
-### `.env` 当前状态
-
-```
-TAOBAO_APP_KEY=35450610
-TAOBAO_APP_SECRET=已填
-TAOBAO_SESSION=          ← 待填（卡在 OAuth）
-TAOBAO_PID=              ← 待填（卡在验证码）
-```
-
-### 也试过「只自己使用」，无效
-
-`console.open.taobao.com/...#/auth`（授权管理 → 设置用户数）从「小部分人使用」改成
-「**只自己使用**」并保存后，OAuth 依旧返回 `app call back is invalidate / invalid_client`。
-
-说明这个设置只影响「能授权给几个用户」，**不是免授权通道**。
-
-### 最终判断
-
-OAuth 回调校验过不去，根因是**应用名下没有淘宝认可的域名**（我们备案的是「他方平台 / 社交平台」，
-没有自有网站）。这与京东「必须要 ICP 备案域名」本质上是同一类门槛，只是淘宝把门设在了 OAuth 这一环。
-
-**提工单大概率也解决不了**——这不是客服开恩的问题，而是没有可校验的域名。
-
-结论：**淘宝 API 对无域名的个人自用工具，暂不可行。**
-等以后有域名时，把回调改成 `https://<域名>/callback` 再走 OAuth 即可，前面拿到的
-AppKey / AppSecret / 权限包 16516 都还有效。
-
-**替代方案**：淘宝联盟后台或淘宝客 App 里手动「一键推广」生成链接，不经过 API。
-
-## 下一步（注册完成后从这里继续）
-
-1. 在普通浏览器打开 <https://pub.alimama.com/> → 一键注册并登录（走支付宝实名）
-2. 回到 <https://aff-open.taobao.com/developer/index.htm> → 新建应用
-3. 联盟推广阵地选 **他方平台** → 备案类型 **社交平台** → 备案身份应出现可选值
-4. 填应用名称 → 提交 → 拿 **app_key / app_secret**
-5. 在开放平台申请权限包：**「淘宝客【推广者】物料搜索」**（含 `taobao.tbk.dg.material.optional`）
-6. 通过 `oauth.taobao.com` 授权拿 **session**
-7. 取推广位 **PID**（形如 `mm_<memberId>_<siteId>_<adzoneId>`）
-8. 填 `.env`：`TAOBAO_APP_KEY` / `TAOBAO_APP_SECRET` / `TAOBAO_SESSION` / `TAOBAO_PID`
-9. 跑 `uv run python scripts\probe_creds.py --platform taobao`
-
-## 代码侧已经对上的地方
-
-本项目 `adapters/taobao.py` 用的搜索接口就是
-`taobao.tbk.dg.material.optional`，与官方「商品/店铺搜索能力」权限包一致。
-
-另外官方文档说明：**物料搜索返回的链接本身就是推广链接**（`s.click` 或 `uland`），
-所以淘宝侧可能不需要额外调转链接口，搜索即转链。
-
-订单查询 `taobao.tbk.order.details.get` 是**邀请制**，需要单独申请。
+1. **申请 27939「商品物料获取」权限包**（已提交，等生效）—— 它含"根据关键词搜索商品"
+2. 取推广位 PID：`mm_3893269134_<siteId>_<adzoneId>`
+   （联盟后台被验证码拦；也可能通过 `taobao.tbk.sc.publisher.info.get` 之类的接口取）
+3. access_token 只有 1 天有效，**过期前用 refresh_token 续**：
+   `POST https://oauth.taobao.com/token`，`grant_type=refresh_token`
+   （refresh_token 有效期 30 天，已写入 `.env` 的 `TAOBAO_REFRESH_TOKEN`）
