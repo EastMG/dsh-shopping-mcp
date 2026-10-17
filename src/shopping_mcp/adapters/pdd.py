@@ -161,7 +161,15 @@ class PddAdapter(Adapter):
             business["with_coupon"] = "true"
 
         wrapper = self._call("pdd.ddk.goods.search", business)
-        return [self._product(item) for item in (wrapper.get("goods_list") or [])]
+        rows = wrapper.get("goods_list") or []
+        if not rows:
+            # Live behaviour on a fresh app: the same query can return 0 rows and
+            # then 3 rows a second later (throttling). Retry once so the caller
+            # does not have to know that and report "no products" wrongly.
+            time.sleep(0.8)
+            wrapper = self._call("pdd.ddk.goods.search", business)
+            rows = wrapper.get("goods_list") or []
+        return [self._product(item) for item in rows]
 
     def detail(self, item: str) -> Product:
         """按 goods_sign 查详情。
