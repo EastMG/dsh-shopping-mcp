@@ -81,6 +81,12 @@ def diagnose(exc: Exception) -> str:
             "应用凭证无效或应用未上线 → client_id / app_key 复制错了，"
             "或应用还卡在审核/未发布（拼多多需完成安全扫描并发布）"
         )
+    if any(k in blob for k in ("40009", "出单较少", "被限制使用")):
+        return (
+            "账号被限流（不是权限、不是凭证问题）→ 拼多多的规则是「调取商品接口多、"
+            "实际出单少」就限用。表现为 40009 业务服务错误。处理：暂停高频调用，"
+            "等限制解除（通常数小时到数天），期间可以手动推广产生真实订单来恢复权重"
+        )
     if any(k in blob for k in ("pid", "p_id", "adzone")):
         return "PID / 推广位无效 → 回联盟后台重新取推广位 ID"
     if any(k in blob for k in ("权限", "permission", "不支持", "not support", "scope", "无权限")):
