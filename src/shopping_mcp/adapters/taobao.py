@@ -120,6 +120,11 @@ class TaobaoAdapter(Adapter):
     # uland 落地页而被淘口令接口拒收（链接不符合规范）。
     _link_cache: dict[str, str] = {}
 
+    # item_id -> search 时拿到的完整 Product，用于补全 detail 的券/佣金信息。
+    # `item.info.get` 只给折后价，没有券和佣金；同一商品 detail 出来的价格会比
+    # search 的券后价高，容易误读，所以在 detail 里合并搜索缓存。
+    _product_cache: dict[str, Product] = {}
+
     def __init__(self) -> None:
         self.cfg = config.load_platforms()["taobao"]
         if not self.cfg.ready:
@@ -191,6 +196,8 @@ class TaobaoAdapter(Adapter):
             link = product.item_url or product.promotion_url
             if product.item_id and link:
                 self._link_cache[product.item_id] = link
+            if product.item_id:
+                self._product_cache[product.item_id] = product
         return products
 
     def detail(self, item_id: str) -> Product:
@@ -198,7 +205,28 @@ class TaobaoAdapter(Adapter):
         results = (wrapper.get("results") or {}).get("n_tbk_item") or []
         if not results:
             raise PlatformError("taobao", f"item not found: {item_id}")
-        return self._product_from_info(results[0])
+        product = self._product_from_info(results[0])
+
+        # item.info.get 不含券/佣金，价格是折后价。若该商品先被 search 过，
+        # 用搜索缓存把券后价、券额、佣金、推广链接补回来，避免同一商品两次
+        # 返回不同价格。
+        cached = self._product_cache.get(str(item_id))
+        if cached is not None:
+            if cached.price is not None:
+                product.price = cached.price
+            if cached.coupon_amount is not None:
+                product.coupon_amount = cached.coupon_amount
+            if cached.commission_rate is not None:
+                product.commission_rate = cached.commission_rate
+                product.commission_amount = cached.commission_amount
+            if cached.sales is not None:
+                product.sales = cached.sales
+            if cached.promotion_url:
+                product.promotion_url = cached.promotion_url
+            if cached.original_price is not None:
+                product.original_price = cached.original_price
+            product.item_id = cached.item_id
+        return product
 
     def convert_link(self, item: str, *, sub_pid: str | None = None) -> PromotionLink:
         """Turn an item id or any Taobao URL into a 淘口令 + short link.
