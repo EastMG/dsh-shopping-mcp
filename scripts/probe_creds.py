@@ -48,7 +48,7 @@ EXPECTED_FIELDS = [
 KNOWN_INTERFACE = {
     "pdd": "pdd.ddk.goods.search",
     "jd": "jd.union.open.goods.query",
-    "taobao": "taobao.tbk.dg.material.optional",
+    "taobao": "taobao.tbk.dg.material.optional.upgrade",
 }
 
 

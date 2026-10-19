@@ -116,3 +116,76 @@ access_token 1 天有效、refresh_token 30 天。脚本会原地改写 `.env` �
 3. access_token 只有 1 天有效，**过期前用 refresh_token 续**：
    `POST https://oauth.taobao.com/token`，`grant_type=refresh_token`
    （refresh_token 有效期 30 天，已写入 `.env` 的 `TAOBAO_REFRESH_TOKEN`）
+
+
+## 最终状态（2026-10-20）：淘宝全链路已打通
+
+用户反馈权限包 27939 已通过。重测后淘宝**完全可用**。
+
+### 关键发现：接口名是 `.upgrade` 变体
+
+权限包 27939 拿到后，`taobao.tbk.dg.material.optional`（经典版）**仍然报权限不足**。
+真正被 27939 打开的是：
+
+```
+taobao.tbk.dg.material.optional.upgrade
+```
+
+它返回的是**嵌套结构**，而且**直接带推广链接**，所以搜索即转链：
+
+```
+result_list.map_data[]:
+  item_basic_info      title / pict_url / shop_title / tk_total_sales / brand_name
+  item_id              不透明 token（不是数字 num_iid）
+  price_promotion_info final_promotion_price(券后价) / zk_final_price / reserve_price
+  publish_info         click_url(s.click，带 PID 追踪) / coupon_share_url / income_info
+```
+
+### 佣金字段校准
+
+`publish_info.income_rate` **本身就是百分比**（0.9 = 0.9%），已用
+`commission_amount / price` 交叉验证：
+
+| 商品 | 券后价 | 佣金额 | 推导% | income_rate |
+|---|---|---|---|---|
+| 东方树叶 | 6.88 | 0.06 | 0.872 | 0.9 |
+| 可口可乐 | 38 | 0.57 | 1.5 | 1.5 |
+| 外星人电解质 | 68 | 0.92 | 1.353 | 1.35 |
+
+`income_info.commission_rate` 是 `income_rate × 100`，仅作兜底。
+
+### 三个接口都能用
+
+| 接口 | 权限包 | 用途 |
+|---|---|---|
+| `taobao.tbk.dg.material.optional.upgrade` | 27939 | 关键词搜索 + 带追踪推广链接 |
+| `taobao.tbk.item.info.get` | 16189 | 商品详情（接受不透明 item_id） |
+| `taobao.tbk.tpwd.create` | 11655 | **淘口令生成**（转链替代方案） |
+
+### 转链方案：`privilege.get` 没权限，改用淘口令
+
+`taobao.tbk.privilege.get` 依然 403（没申请转链权限包），但 11655 淘口令可用：
+
+```
+输入：https://s.click.taobao.com/t?e=...
+输出：38￥ HU591 dHtgTF3x3Jb￥ https://m.tb.cn/h.j2k2Ob9  商品标题
+```
+
+注意：淘口令接口**只接受规范商品链接**，不接受 `uland.taobao.com/item/edetail`
+落地页（会报「链接不符合规范」）。所以适配器里加了 item_id → 推广链接的缓存，
+`convert_link` 优先复用搜索时已生成的 `click_url`。
+
+### 实测结果
+
+```
+search("无糖饮料")  → 10 条，例：倍思 BC1 耳机 ¥136 / 原价400 / 券87 / 佣金1.8% / 销量1000
+convert_link(item)  → https://m.tb.cn/h.j2k2Ob9
+detail(item)        → 商品详情
+smoke               → 43/43 ALL GREEN
+```
+
+### 仍需注意
+
+- access_token **1 天**有效，用 `scripts\taobao_refresh_token.py` 续（已脚本化，refresh 30 天）
+- 转链权限包（privilege.get）没申请，淘口令是可用的替代
+- MCP 服务需要**重启**才能加载新适配器（它用项目 `.venv` 跑，editable 安装）
