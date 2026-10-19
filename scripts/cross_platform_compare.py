@@ -17,13 +17,20 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from pdd_unit_price import parse_total_ml  # noqa: E402
+from pdd_unit_price import (  # noqa: E402
+    EXCLUDE_HINTS,
+    RISK_HINTS,
+    SUGAR_FREE,
+    parse_total_ml,
+    sugary_component,
+)
 
 from shopping_mcp import config  # noqa: E402
 from shopping_mcp.adapters.pdd import PddAdapter  # noqa: E402
@@ -31,10 +38,14 @@ from shopping_mcp.adapters.taobao import TaobaoAdapter  # noqa: E402
 
 EXCLUDE_DEFAULT = "苏打水,临期"
 
+# 标题里同时出现这些词 + 无糖 → 多半是含糖/混合 SKU 链接
+SUSPECT = re.compile(r"原味|含糖")
+
 
 def collect(adapter, keyword: str, pages: int, excludes: list[str]) -> list[dict]:
     rows: list[dict] = []
     seen: set[str] = set()
+    dropped_suspect = 0
     for page in range(1, pages + 1):
         try:
             items = adapter.search(keyword, page=page, page_size=50)
@@ -44,6 +55,19 @@ def collect(adapter, keyword: str, pages: int, excludes: list[str]) -> list[dict
         for it in items:
             title = it.title or ""
             if it.item_id in seen:
+                continue
+            # 必须真的无糖：搜索关键词会带出「原味/经典」这类含糖款
+            if not SUGAR_FREE.search(title):
+                continue
+            # 标题同时出现「原味 / 含糖」→ 典型的多 SKU 混合链接：
+            # 商家用「无糖」堆关键词，但最低价那个 SKU 往往是含糖原味
+            if SUSPECT.search(title):
+                dropped_suspect += 1
+                continue
+            # 混装里只要有一款含糖（如「雪碧芬达无糖可乐」）就排除
+            if sugary_component(title):
+                continue
+            if any(h in title for h in EXCLUDE_HINTS):
                 continue
             if any(e in title for e in excludes):
                 continue
@@ -69,6 +93,11 @@ def collect(adapter, keyword: str, pages: int, excludes: list[str]) -> list[dict
                     "ambiguous": ambiguous,
                 }
             )
+    if dropped_suspect:
+        print(
+            f"  [{adapter.platform}] 已剔除 {dropped_suspect} 条「原味/含糖」混合链接",
+            file=sys.stderr,
+        )
     return rows
 
 
