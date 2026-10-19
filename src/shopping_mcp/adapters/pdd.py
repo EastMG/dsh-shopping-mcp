@@ -19,7 +19,9 @@ from __future__ import annotations
 
 import json
 import re
+import sys
 import time
+from pathlib import Path
 from typing import Any
 
 from .. import config
@@ -85,6 +87,109 @@ def _find_url(node: Any) -> str | None:
     return None
 
 
+# ---------------------------------------------------------------- throttling
+#
+# 拼多多的规则：**调取商品接口多、实际出单少 → 限用**（40009
+# 「当前duoId因大量调取商品接口但出单较少被限制使用」）。
+#
+# 这个限制是账号级的，一旦触发所有搜索都会失败，而且继续调用只会加重。
+# 所以这里做四道闸：
+#   1. 搜索结果缓存（同一个关键词几分钟内不重复请求）
+#   2. 最小请求间隔（默认 3 秒一次）
+#   3. 每日调用上限（默认 150 次，跨进程持久化到 .pdd_quota.json）
+#   4. 撞到 40009 后主动冷却（默认 30 分钟），期间直接失败不再打网络
+#
+# 四个参数都能用环境变量覆盖：
+#   PDD_MIN_INTERVAL / PDD_CACHE_TTL / PDD_DAILY_BUDGET / PDD_COOLDOWN
+
+_ROOT = Path(__file__).resolve().parents[3]
+_STATE_FILE = _ROOT / ".pdd_quota.json"
+
+
+def _env_num(name: str, default: float) -> float:
+    try:
+        return float(__import__("os").environ.get(name, default))
+    except (TypeError, ValueError):
+        return default
+
+
+_MIN_INTERVAL = _env_num("PDD_MIN_INTERVAL", 3.0)
+_CACHE_TTL = _env_num("PDD_CACHE_TTL", 900.0)
+_DAILY_BUDGET = int(_env_num("PDD_DAILY_BUDGET", 150))
+_COOLDOWN = _env_num("PDD_COOLDOWN", 1800.0)
+
+_last_call_mono = 0.0
+_search_cache: dict[tuple[Any, ...], tuple[float, list[Product]]] = {}
+
+
+def _load_state() -> dict[str, Any]:
+    try:
+        return json.loads(_STATE_FILE.read_text(encoding="utf-8"))
+    except Exception:  # noqa: BLE001 - 文件不存在/不可读都按空状态处理
+        return {}
+
+
+def _save_state(state: dict[str, Any]) -> None:
+    try:
+        _STATE_FILE.write_text(json.dumps(state), encoding="utf-8")
+    except Exception:  # noqa: BLE001 - 沙箱只读时退化为纯内存计数
+        pass
+
+
+def _throttle() -> None:
+    """请求前置检查：冷却 / 日配额 / 最小间隔。"""
+    global _last_call_mono
+    import time as _t
+
+    now = _t.time()
+    state = _load_state()
+    today = _t.strftime("%Y-%m-%d", _t.localtime(now))
+    if state.get("day") != today:
+        state = {"day": today, "count": 0, "cooldown_until": state.get("cooldown_until", 0)}
+
+    cooldown_until = float(state.get("cooldown_until") or 0)
+    if cooldown_until > now:
+        mins = int((cooldown_until - now) / 60) + 1
+        raise PlatformError(
+            "pdd",
+            f"拼多多调用主动冷却中（上次撞到 40009 限流），约需 {mins} 分钟恢复。"
+            "这段时间请不要重复调用，越调限制越久。",
+            code="client.cooldown",
+        )
+
+    if int(state.get("count") or 0) >= _DAILY_BUDGET:
+        raise PlatformError(
+            "pdd",
+            f"今日拼多多调用已达自设上限 {_DAILY_BUDGET} 次，避免触发 40009 限流。"
+            "明天自动重置；需要更多可调大 PDD_DAILY_BUDGET。",
+            code="client.budget",
+        )
+
+    wait = _MIN_INTERVAL - (_t.monotonic() - _last_call_mono)
+    if wait > 0:
+        _t.sleep(wait)
+
+    state["day"] = today
+    state["count"] = int(state.get("count") or 0) + 1
+    _save_state(state)
+    _last_call_mono = _t.monotonic()
+
+
+def _enter_cooldown() -> None:
+    """撞到 40009 后写冷却时间，后续调用直接失败，不再打网络。"""
+    import time as _t
+
+    state = _load_state()
+    today = _t.strftime("%Y-%m-%d", _t.localtime())
+    state.setdefault("day", today)
+    state["cooldown_until"] = _t.time() + _COOLDOWN
+    _save_state(state)
+    print(
+        f"[pdd] 触发限流 40009，已进入 {int(_COOLDOWN / 60)} 分钟冷却期",
+        file=sys.stderr,
+    )
+
+
 class PddAdapter(Adapter):
     platform = "pdd"
     mode = "live"
@@ -98,6 +203,7 @@ class PddAdapter(Adapter):
 
     # ------------------------------------------------------------------ core
     def _call(self, method: str, business: dict[str, Any]) -> dict[str, Any]:
+        _throttle()  # 冷却 / 日配额 / 最小间隔
         params: dict[str, Any] = {
             "type": method,
             "client_id": self.client_id,
@@ -111,6 +217,10 @@ class PddAdapter(Adapter):
 
         if "error_response" in payload:
             err = payload["error_response"]
+            sub_code = str(err.get("sub_code") or "")
+            # 40009 = 调取多、出单少 被限用。一旦出现就进冷却，避免继续加重。
+            if sub_code == "40009" or "出单较少" in str(err.get("sub_msg") or ""):
+                _enter_cooldown()
             raise PlatformError(
                 "pdd",
                 f"{err.get('error_msg') or err.get('sub_msg') or 'unknown error'} (method={method})",
@@ -160,6 +270,13 @@ class PddAdapter(Adapter):
         if has_coupon:
             business["with_coupon"] = "true"
 
+        # 结果缓存：比价脚本会反复问同样的关键词，缓存能砍掉绝大部分调用
+        cache_key = (keyword, page, business["page_size"], has_coupon, sort)
+        hit = _search_cache.get(cache_key)
+        if hit is not None and (time.time() - hit[0]) < _CACHE_TTL:
+            print(f"[pdd] 命中缓存 {keyword!r} p{page}", file=sys.stderr)
+            return hit[1]
+
         wrapper = self._call("pdd.ddk.goods.search", business)
         rows = wrapper.get("goods_list") or []
         if not rows:
@@ -169,7 +286,10 @@ class PddAdapter(Adapter):
             time.sleep(0.8)
             wrapper = self._call("pdd.ddk.goods.search", business)
             rows = wrapper.get("goods_list") or []
-        return [self._product(item) for item in rows]
+        products = [self._product(item) for item in rows]
+        if products:  # 只缓存成功结果，空结果可能是瞬时抖动
+            _search_cache[cache_key] = (time.time(), products)
+        return products
 
     def detail(self, item: str) -> Product:
         """按 goods_sign 查详情。

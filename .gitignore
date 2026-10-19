@@ -12,5 +12,7 @@ __pycache__/
 _*.log
 _smoke.log
 _probe_raw_*.json
+# 拼多多调用配额/冷却状态（本地运行态，不入库）
+.pdd_quota.json
 
 # uv.lock 刻意保留入库：这是可执行应用，锁文件保证依赖可复现
