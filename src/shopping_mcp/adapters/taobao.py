@@ -114,6 +114,12 @@ class TaobaoAdapter(Adapter):
     platform = "taobao"
     mode = "live"
 
+    # item_id -> 已带 PID 追踪的推广链接，由 search() 填充。
+    # 必须是**类级别**：MCP server 每次工具调用都会新建 adapter 实例，
+    # 实例级缓存会在「先 search 再 convert_link」之间丢失，导致 convert 回退到
+    # uland 落地页而被淘口令接口拒收（链接不符合规范）。
+    _link_cache: dict[str, str] = {}
+
     def __init__(self) -> None:
         self.cfg = config.load_platforms()["taobao"]
         if not self.cfg.ready:
@@ -124,10 +130,6 @@ class TaobaoAdapter(Adapter):
         self.app_key = self.cfg.require("TAOBAO_APP_KEY")
         self.session = self.cfg.require("TAOBAO_SESSION")
         self.site_id, self.adzone_id = _parse_pid(self.cfg.require("TAOBAO_PID"))
-        # item_id -> 已带 PID 追踪的推广链接，由 search() 填充。
-        # 淘口令接口只接受规范商品链接，不接受 uland 落地页，所以这里复用搜索时
-        # 已经生成的 click_url，避免再解析一次。
-        self._link_cache: dict[str, str] = {}
 
     # ------------------------------------------------------------------ core
     def _call(self, method: str, business: dict[str, Any]) -> dict[str, Any]:
@@ -205,13 +207,30 @@ class TaobaoAdapter(Adapter):
         淘口令接口 instead: it accepts a URL and returns a tracked short link
         plus a share password.
         """
-        url = self._link_cache.get(str(item))
-        if not url:
-            url = item if str(item).startswith("http") else self._url_for(item)
+        cached = self._link_cache.get(str(item))
+        if cached:
+            url = cached
+        elif str(item).startswith("http"):
+            url = str(item)
+        else:
+            url = self._url_for(item)
         if sub_pid:
             url = f"{url}&relationId={sub_pid}" if "?" in url else f"{url}?relationId={sub_pid}"
 
-        wrapper = self._call(TPWD_METHOD, {"url": url})
+        try:
+            wrapper = self._call(TPWD_METHOD, {"url": url})
+        except PlatformError as exc:
+            if "链接不符合规范" in str(exc) and not cached:
+                raise PlatformError(
+                    "taobao",
+                    "淘宝转链需要「带追踪的推广链接」，而该 item_id 没有搜索上下文。"
+                    "请先用 search_products(keyword=...) 搜到该商品再转链（搜索结果会缓存链接），"
+                    "或直接传一个完整的淘宝/天猫商品 URL。"
+                    "原因：淘口令接口拒收 uland 落地页，只有 s.click 推广链接才被接受",
+                    code=getattr(exc, "code", ""),
+                    detail=getattr(exc, "detail", None),
+                ) from exc
+            raise
         data = wrapper.get("data") or {}
         model = str(data.get("model") or "")
         short = _SHORT_URL_RE.search(model)
