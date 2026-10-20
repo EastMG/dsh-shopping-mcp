@@ -1,5 +1,12 @@
 # shopping-mcp
 
+[![MCP](https://img.shields.io/badge/MCP-server-4D6BFE?style=flat-square)](https://modelcontextprotocol.io)
+[![Python](https://img.shields.io/badge/python-3.11%2B-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/downloads/)
+[![License](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
+[![Smoke](https://img.shields.io/badge/smoke-43%2F43%20passed-brightgreen?style=flat-square)](scripts/smoke.py)
+[![Live](https://img.shields.io/badge/live-Taobao%20%C2%B7%20Pinduoduo-FF5000?style=flat-square)](#当前状态)
+[![JD](https://img.shields.io/badge/JD-API%20permission%20blocked-lightgrey?style=flat-square)](#当前状态)
+
 一个 MCP server，把**淘宝 / 京东 / 拼多多**的商品搜索、详情、转链（含优惠券）收成同一套工具，直接接进 DSH。
 
 **只调官方开放平台接口。** 没有第三方代理、没有远程配置下发、没有凭证转发。
@@ -205,6 +212,7 @@ uv run python scripts\probe_creds.py --platform pdd
 | DSH 叠加层结构与 YAML 合法性 | 结构校验 | 通过 |
 | smoke 的机器无关性 | 灌入假凭证后重跑 | 仍 43/43，不依赖本机 `.env` |
 | **拼多多真实接口全链路** | **真实 appkey + 已完成授权备案** | **✅ 通过** |
+| **淘宝真实接口全链路** | **真实 appkey + 权限包 27939/16189/11655** | **✅ 通过** |
 
 **拼多多 live 实核（2026-10-18）**：
 
@@ -219,11 +227,24 @@ uv run python scripts\probe_creds.py --platform pdd
 
 跑法：`uv run python scripts\smoke.py`（43 项，全 mock，无需凭证）
 
+**淘宝 live 实核（2026-10-20）**：
+
+| 能力 | 结果 |
+|---|---|
+| OAuth 授权 | ✅ 回调必须是**非淘系域名**（`example.com` 可用，`www.taobao.com` 会被拒） |
+| `access_token` | ✅ 1 天有效，`refresh_token` 30 天，用 `scripts\taobao_refresh_token.py` 续 |
+| `tbk.dg.material.optional.upgrade` | ✅ 关键词搜索，返回真实商品 + **带 PID 追踪的推广链接** |
+| `tbk.item.info.get` | ✅ 商品详情（接口本身不含券/佣金，适配器从搜索缓存补齐） |
+| `tbk.tpwd.create` | ✅ 转链为淘口令 + 短链（`privilege.get` 无权限，用淘口令替代） |
+
+> 注意：权限包 27939 打开的是 `.upgrade` 变体，经典版 `tbk.dg.material.optional` 永远报权限不足。
+
 ### 未验证
 
-- **淘宝 / 京东从未调通** —— 还没申请这两家
+- **京东 API 未打通**（不是资质问题）。推客审核已过、appkey/AppSecret/PID 都拿到了，但基础权限包只有 19 个接口，`goods.query`（关键词搜索）和 `promotion.bysubunionid.get`（导购媒体转链）都返回 `403 无访问权限`。详见 [`docs/apply-jd.md`](docs/apply-jd.md)
 - **DSH 里的 stdio 启动** 未验证。会话内沙箱禁止创建子进程双向管道（WinError 5），所以协议层是用内存传输测的；真实 stdio 拉起要等你注册并重启 DSH 后确认
 - 拼多多 `ddk.goods.search` 对新应用有节流，同样关键词有时返回 0 条、有时 3 条。这不是 bug，重试即可
+- 拼多多对**高频查询但不出单**的账号会限用（`40009`）。适配器已内置缓存 / 最小间隔 / 日配额 / 冷却四道闸，详见下文
 
 ### 踩过的坑（已修，都是真实接口才暴露的）
 
@@ -239,11 +260,26 @@ uv run python scripts\probe_creds.py --platform pdd
 | `sales` 是字符串 `"7万+"` | 直接 `to_int` 得到 None | 新增 `_parse_sales_tip()` |
 | 拼多多搜索不返回店铺名 | `mall_name` 恒为空字符串 | 如实返回 `null`，不用品牌名冒充 |
 
+## 拼多多调用节流
+
+拼多多的规则是「**调取商品接口多、实际出单少 → 限用**」（`40009`）。这个限制是账号级的，触发后**所有搜索都会失败**，而且继续调用只会加重，所以适配器内置四道闸：
+
+| 层 | 作用 | 默认 |
+|---|---|---|
+| 结果缓存 | 同关键词/页码/排序在 TTL 内不重复请求 | 900 秒 |
+| 最小间隔 | 两次请求之间至少隔这么久 | 3 秒 |
+| 每日配额 | 一天最多调用次数，跨进程持久化到 `.pdd_quota.json` | 150 次 |
+| 冷却 | 撞到 `40009` 后主动停用，期间直接失败**不打网络** | 1800 秒 |
+
+全部可用环境变量覆盖：`PDD_MIN_INTERVAL` / `PDD_CACHE_TTL` / `PDD_DAILY_BUDGET` / `PDD_COOLDOWN`。
+
+状态文件 `.pdd_quota.json` 在 `.gitignore` 里。想提前重试可以删掉它，但平台侧的解封要等它自己（通常数小时到数天）。
+
 ## 开发
 
 ```powershell
 uv sync                                              # 装依赖
-uv run python scripts\smoke.py                       # 36 项检查，全部走 mock，不需要任何凭证
+uv run python scripts\smoke.py                       # 43 项检查，全部走 mock，不需要任何凭证
 uv run --with pyyaml python scripts\check_patch.py    # 校验 DSH 叠加层结构
 uv run python scripts\probe_creds.py                 # 用真实凭证验证字段映射
 ```
@@ -258,4 +294,6 @@ uv run python scripts\probe_creds.py                 # 用真实凭证验证字�
 [MIT](LICENSE) © 2026 EastMG
 
 本项目只调用各平台官方开放平台 API，不包含任何平台的数据或代码。使用前请自行确认符合各平台的开放平台协议与推广规则。
+
+[![](https://img.shields.io/badge/powered_by-dsh-4D6BFE?style=flat-square&logo=deepseek&logoColor=white)](https://github.com/deepseek-ai/deepseek-harness)
 
