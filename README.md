@@ -33,20 +33,6 @@ uv run shopping-mcp
 
 `shopping-mcp` 是 **stdio** 传输的 MCP server，正常用法是被 DSH 拉起来，而不是手动运行。
 
-### 用 Docker 跑（ghcr.io）
-
-不装 Python / uv 时用容器；镜像由 Actions 从本仓库构建（push 到 `main` 或打 tag 都会重建）。
-
-```bash
-# 没有 .env 也能跑：三家全部 mock 模式
-docker run --rm -i ghcr.io/eastmg/shopping-mcp:latest
-
-# 带凭证
-docker run --rm -i --env-file .env ghcr.io/eastmg/shopping-mcp:latest
-```
-
-`-i` 不能省——stdio 传输靠 stdin/stdout。挂进 DSH 时 command 填 `docker`，args 填 `run --rm -i --env-file <你的 .env 绝对路径> ghcr.io/eastmg/shopping-mcp:latest`。
-
 ### 挂进 DSH
 
 **推荐做法：用 DSH 自带的 MCP 管理界面。**
