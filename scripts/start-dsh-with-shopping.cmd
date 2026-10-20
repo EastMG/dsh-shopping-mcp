@@ -10,7 +10,9 @@ rem  If you want it always on, run register-mcp.cmd from a normal PowerShell
 rem  window instead.
 rem ===========================================================================
 setlocal
-set "PATCH=F:\DeepSeek\DeepSeek-Workplace\DSH-Workplace-01\shopping-mcp\dsh\mcp-shopping.patch.yml"
+rem 相对本脚本定位项目根目录，换机器/换目录都不用改
+set "HERE=%~dp0"
+set "PATCH=%HERE%..\dsh\mcp-shopping.patch.yml"
 
 if not exist "%PATCH%" (
   echo Patch file not found: %PATCH%

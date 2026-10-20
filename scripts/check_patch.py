@@ -51,7 +51,12 @@ def main() -> int:
     check("transport is stdio", config.get("transport") == "stdio", str(config.get("transport")))
 
     command = config.get("command") or ""
-    check("command path exists", Path(command).is_file(), command)
+    if "<" in command and ">" in command:
+        # 模板文件里的占位符（<项目路径>），没有可校验的实物路径，
+        # 改用提示而不是判失败——直接跑 register_mcp.py 会生成真实路径。
+        print("  SKIP  command path exists  (占位符，未替换为真实路径)")
+    else:
+        check("command path exists", Path(command).is_file(), command)
     check("args launch the module", config.get("args") == ["-m", "shopping_mcp.server"], str(config.get("args")))
 
     print()

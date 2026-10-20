@@ -46,14 +46,14 @@ uv run shopping-mcp
 {
   "mcpServers": {
     "shopping": {
-      "command": "F:/DeepSeek/DeepSeek-Workplace/DSH-Workplace-01/shopping-mcp/.venv/Scripts/python.exe",
+      "command": "<项目路径>/.venv/Scripts/python.exe",
       "args": ["-m", "shopping_mcp.server"]
     }
   }
 }
 ```
 
-3. 保存后展开 `shopping` 那一行，应能看到 5 个工具：`shopping_status` / `search_products` / `get_product` / `convert_link`
+3. 保存后展开 `shopping` 那一行，应能看到 4 个工具：`shopping_status` / `search_products` / `get_product` / `convert_link`
 
 凭证**不要写在这里**——server 自己读项目根目录的 `.env`。管理器的掩码机制（`KEY|SECRET|TOKEN` 类值会打码）也说明这类配置本就是给它看的，密钥不该放进去。
 
@@ -68,8 +68,8 @@ uv run shopping-mcp
 或者在 PowerShell 里手动跑（等价）：
 
 ```powershell
-cd F:\DeepSeek\DeepSeek-Workplace\DSH-Workplace-01\shopping-mcp
-$env:UV_CACHE_DIR="$PWD\..\.uv-cache-probe"
+cd <项目路径>
+# 若 uv 缓存目录不可写，再按需设置 UV_CACHE_DIR
 uv run --with pyyaml python scripts\register_mcp.py
 ```
 
@@ -81,7 +81,7 @@ uv run --with pyyaml python scripts\register_mcp.py
 **B. 临时挂载** — 不写任何配置，每次启动带参数：
 
 ```powershell
-dsh --profile desktop --patch "F:\DeepSeek\DeepSeek-Workplace\DSH-Workplace-01\shopping-mcp\dsh\mcp-shopping.patch.yml" web
+dsh --profile desktop --patch "<项目路径>\dsh\mcp-shopping.patch.yml" web
 ```
 
 凭证**不写在这些配置里**。server 启动时自己读项目根目录的 `.env`，所以配置文件里看不到密钥，也不会进 config dump。
@@ -196,7 +196,13 @@ uv run python scripts\probe_creds.py --platform pdd
 - 只读性质：搜索、查详情、生成推广链接。没有下单、没有改价、没有动账户设置
 - `.env` 必须留在本机，不要提交到 git
 
-## 当前状态
+## 支持情况
+
+| 平台 | 搜索 | 详情 | 转链 | 前置条件 |
+|---|---|---|---|---|
+| **拼多多** | ✅ | ✅ | ✅ 短链 | 多多进宝绑定 + 推广位授权备案 |
+| **淘宝** | ✅ | ✅ | ✅ 淘口令 + 短链 | 权限包 27939 / 16189 / 11655，见 [docs/apply-taobao.md](docs/apply-taobao.md) |
+| **京东** | ❌ | ⚠️ 部分 | ❌ | 基础权限包不含 `goods.query` / `bysubunionid`，返回 `403`，见 [docs/apply-jd.md](docs/apply-jd.md) |
 
 ### 已验证
 
@@ -205,39 +211,32 @@ uv run python scripts\probe_creds.py --platform pdd
 | 签名算法（三平台共用） | 与手算 MD5 对齐 | 通过 |
 | 单位归一化（分→元、千分比→百分比、汇率三口径） | 单元断言 | 通过 |
 | 淘宝 PID 解析 / 拼多多 `sales_tip` 解析 / `goods_sign` 判别 | 单元断言 | 通过 |
-| 五个工具的 MCP 协议往返 | 内存传输握手 + `tools/list` + `tools/call` | 43/43 通过 |
+| 四个工具的 MCP 协议往返 | 内存传输握手 + `tools/list` + `tools/call` | 43/43 通过 |
 | 商品字段一致性（价格 = 原价 − 券） | 断言 | 通过 |
 | `has_coupon` 确实只返回有券商品 | 断言 | 通过 |
 | 非法 platform 不崩、返回 `ok:false` | 断言 | 通过 |
 | DSH 叠加层结构与 YAML 合法性 | 结构校验 | 通过 |
 | smoke 的机器无关性 | 灌入假凭证后重跑 | 仍 43/43，不依赖本机 `.env` |
-| **拼多多真实接口全链路** | **真实 appkey + 已完成授权备案** | **✅ 通过** |
-| **淘宝真实接口全链路** | **真实 appkey + 权限包 27939/16189/11655** | **✅ 通过** |
-
-**拼多多 live 实核（2026-10-18）**：
-
-| 能力 | 结果 |
-|---|---|
-| 签名 | ✅ 真实网关接受（走到业务校验层，不再报签名错） |
-| `pdd.ddk.goods.search` | ✅ 返回真实商品：`【原道】弦雪入耳DSP有线耳机` ¥49.99/¥60.99、券 ¥10、佣金率 3.0%、销量 4076 |
-| `pdd.ddk.goods.detail` | ✅ 用 `goods_sign` 查到详情 |
-| `pdd.ddk.goods.promotion.url.generate` | ✅ 生成真实推广链接 + 短链 `https://p.pinduoduo.com/lL4kjhCQ?sc=EFAC` |
-| `pdd.ddk.member.authority.query` | ✅ `bind=1`（授权备案已完成） |
-| 传数字 goods_id | ✅ 按预期拒绝，并给出「改用 extra.goods_sign」的指引 |
+| 拼多多真实接口全链路 | 真实 appkey + 已完成授权备案 | ✅ 通过 |
+| 淘宝真实接口全链路 | 真实 appkey + 权限包 | ✅ 通过 |
 
 跑法：`uv run python scripts\smoke.py`（43 项，全 mock，无需凭证）
 
-**淘宝 live 实核（2026-10-20）**：
+### 各平台实测要点
 
-| 能力 | 结果 |
-|---|---|
-| OAuth 授权 | ✅ 回调必须是**非淘系域名**（`example.com` 可用，`www.taobao.com` 会被拒） |
-| `access_token` | ✅ 1 天有效，`refresh_token` 30 天，用 `scripts\taobao_refresh_token.py` 续 |
-| `tbk.dg.material.optional.upgrade` | ✅ 关键词搜索，返回真实商品 + **带 PID 追踪的推广链接** |
-| `tbk.item.info.get` | ✅ 商品详情（接口本身不含券/佣金，适配器从搜索缓存补齐） |
-| `tbk.tpwd.create` | ✅ 转链为淘口令 + 短链（`privilege.get` 无权限，用淘口令替代） |
+**拼多多**
 
-> 注意：权限包 27939 打开的是 `.upgrade` 变体，经典版 `tbk.dg.material.optional` 永远报权限不足。
+- 签名、搜索、详情、转链、授权查询全部走通真实网关
+- 传数字 `goods_id` 会被拒绝，必须用 `extra.goods_sign`
+- 搜索 `page_size` 必须在 10-100，adapter 内已 clamp
+
+**淘宝**
+
+- OAuth 回调必须是**非淘系域名**（`example.com` 可用，`www.taobao.com` 会被拒）
+- `access_token` 1 天有效、`refresh_token` 30 天，用 `scripts\taobao_refresh_token.py` 续
+- 权限包 27939 打开的是 **`.upgrade`** 变体，经典版 `tbk.dg.material.optional` 永远报权限不足
+- `tbk.item.info.get` 不含券/佣金，适配器从搜索缓存补齐
+- `privilege.get` 无权限，转链走 `tbk.tpwd.create`（淘口令 + 短链）
 
 ### 未验证
 

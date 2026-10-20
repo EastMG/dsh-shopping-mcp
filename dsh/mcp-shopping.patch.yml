@@ -1,5 +1,9 @@
 # shopping-mcp — DSH 叠加层（patch overlay）
 #
+# ⚠️ 使用前把下面的 <项目路径> 换成你自己的 checkout 绝对路径（正斜杠）。
+#    或者直接跑 `uv run --with pyyaml python scripts\register_mcp.py`，
+#    它会按当前项目位置自动生成正确路径，不用手改。
+#
 # 三种用法，任选其一：
 #
 # A) 只验证、不改任何东西（推荐先跑这个）：
@@ -10,11 +14,11 @@
 #      dsh --profile desktop --patch "<本文件绝对路径>" web
 #
 # C) 永久生效：把下面的 `- insert:` 整段追加到
-#      C:\Users\<你>\.dsh\profiles\desktop\cordis.patch.yml  末尾
+#      <你>.dsh/profiles/desktop/cordis.patch.yml  末尾
 #    然后重启 DSH。（推荐，因为 A/B 每次启动都要带参数）
 #
 # 凭证不在这里配置。server 启动时自行读取
-#   F:\DeepSeek\DeepSeek-Workplace\DSH-Workplace-01\shopping-mcp\.env
+#   <项目路径>/.env
 # 未填凭证的平台会自动以 mock 模式运行，所以先注册再申请 appkey 也能用。
 
 - insert:
@@ -23,7 +27,7 @@
       config:
         serverName: "shopping"
         transport: "stdio"
-        command: "F:/DeepSeek/DeepSeek-Workplace/DSH-Workplace-01/shopping-mcp/.venv/Scripts/python.exe"
+        command: "<项目路径>/.venv/Scripts/python.exe"
         args:
           - "-m"
           - "shopping_mcp.server"
